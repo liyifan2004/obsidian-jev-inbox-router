@@ -1,0 +1,358 @@
+/* ==========================================================================
+   JEV Inbox Router
+   全部使用 Obsidian 的 CSS 变量，自动跟随亮色 / 暗色主题。
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- 状态栏 */
+
+.jev-status {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	cursor: pointer;
+	font-variant-numeric: tabular-nums;
+	transition: color 120ms ease;
+}
+
+.jev-status:hover {
+	color: var(--text-normal);
+}
+
+.jev-status.is-busy {
+	color: var(--text-accent);
+	animation: jev-pulse 1.4s ease-in-out infinite;
+}
+
+.jev-status.is-warn {
+	color: var(--text-warning, #d9a400);
+}
+
+.jev-status.is-error {
+	color: var(--text-error, #e5534b);
+}
+
+.jev-dot {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--text-faint);
+	flex: 0 0 auto;
+}
+
+@keyframes jev-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.45;
+	}
+}
+
+/* ------------------------------------------------------ 笔记内的判断块 */
+
+.callout[data-callout="jev-route"] {
+	--callout-color: 92, 141, 255;
+	--callout-icon: lucide-inbox;
+	font-size: var(--font-ui-smaller);
+}
+
+.callout[data-callout="jev-route"] .callout-content p {
+	margin-block: 0.25em;
+}
+
+details.jev-route-block {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 0.5em 0.8em;
+	background: var(--background-secondary);
+	font-size: var(--font-ui-smaller);
+}
+
+details.jev-route-block > summary {
+	cursor: pointer;
+	color: var(--text-muted);
+	font-weight: 600;
+}
+
+/* ------------------------------------------------------------ 判断弹窗 */
+
+.jev-modal {
+	--jev-row-gap: 10px;
+}
+
+.jev-verdict {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 12px 14px;
+	margin-bottom: 16px;
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+	font-size: 1.05em;
+	font-weight: 600;
+	flex-wrap: wrap;
+}
+
+.jev-verdict-cat {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+}
+
+.jev-verdict .jev-arrow {
+	color: var(--text-faint);
+}
+
+.jev-verdict-folder {
+	font-family: var(--font-monospace);
+	font-size: 0.9em;
+	padding: 2px 8px;
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-hover);
+	color: var(--text-accent);
+}
+
+.jev-meta-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+	gap: 10px;
+	margin-bottom: 20px;
+}
+
+.jev-meta-cell {
+	padding: 10px 12px;
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+}
+
+.jev-meta-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin-bottom: 4px;
+}
+
+.jev-meta-value {
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	line-height: 1.35;
+	word-break: break-word;
+}
+
+.jev-chart {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-bottom: 20px;
+}
+
+.jev-prob-row {
+	display: grid;
+	grid-template-columns: 18px 68px 1fr 44px;
+	align-items: center;
+	gap: 8px;
+	font-size: var(--font-ui-smaller);
+}
+
+.jev-prob-row.is-chosen {
+	font-weight: 700;
+}
+
+.jev-prob-row.is-chosen .jev-prob-track {
+	box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.jev-prob-key {
+	font-family: var(--font-monospace);
+	font-weight: 700;
+	text-align: center;
+}
+
+.jev-prob-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-muted);
+}
+
+.jev-prob-row.is-chosen .jev-prob-label {
+	color: var(--text-normal);
+}
+
+.jev-prob-track {
+	height: 8px;
+	border-radius: 4px;
+	background: var(--background-modifier-border);
+	overflow: hidden;
+}
+
+.jev-prob-fill {
+	height: 100%;
+	border-radius: 4px;
+	transition: width 260ms ease;
+}
+
+.jev-prob-val {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	color: var(--text-muted);
+}
+
+.jev-row.is-chosen .jev-prob-val,
+.jev-prob-row.is-chosen .jev-prob-val {
+	color: var(--text-normal);
+}
+
+.jev-actions {
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: 8px;
+}
+
+.jev-actions .setting-item {
+	border: none;
+	padding-top: 4px;
+}
+
+/* ------------------------------------------------------------ 选择列表 */
+
+.jev-picker-list {
+	max-height: 55vh;
+	overflow-y: auto;
+	margin-top: 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+}
+
+.jev-picker-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 9px 12px;
+	cursor: pointer;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.jev-picker-item:last-child {
+	border-bottom: none;
+}
+
+.jev-picker-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+.jev-picker-title {
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+}
+
+.jev-picker-sub {
+	margin-left: auto;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.jev-search,
+.jev-wide-input {
+	width: 100%;
+}
+
+.jev-empty {
+	padding: 16px;
+	text-align: center;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+/* -------------------------------------------------------------- 设置页 */
+
+.jev-settings .jev-intro {
+	color: var(--text-muted);
+	max-width: 46em;
+}
+
+.jev-settings .jev-hint {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	margin-top: -6px;
+}
+
+.jev-cat-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-bottom: 12px;
+}
+
+.jev-cat-card {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+	overflow: hidden;
+}
+
+.jev-cat-card.is-disabled {
+	opacity: 0.5;
+}
+
+.jev-cat-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 12px;
+	flex-wrap: wrap;
+}
+
+.jev-cat-key {
+	font-family: var(--font-monospace);
+	font-weight: 700;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	min-width: 14px;
+	cursor: help;
+}
+
+.jev-cat-label-input {
+	flex: 0 1 180px;
+	font-weight: 600;
+}
+
+.jev-cat-folder-preview {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 22em;
+}
+
+.jev-spacer {
+	flex: 1 1 auto;
+}
+
+.jev-toggle-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.jev-cat-body {
+	padding: 0 12px 4px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.jev-cat-body .setting-item {
+	padding: 10px 0;
+}
+
+.jev-icon-btn {
+	font-size: var(--font-ui-smaller);
+}
+
+.jev-color-input {
+	width: 44px;
+	padding: 2px;
+	height: 30px;
+}

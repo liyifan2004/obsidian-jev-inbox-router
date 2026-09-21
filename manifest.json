@@ -1,0 +1,10 @@
+{
+	"id": "jev-inbox-router",
+	"name": "JEV Inbox Router",
+	"version": "0.1.0",
+	"minAppVersion": "1.5.0",
+	"description": "用 JEV（TypeSafe System One）判断每条笔记的归属，自动分流到对应文件夹。它不替你写任何内容，只回答一个问题：这个东西应该去哪？",
+	"author": "liyifan2004",
+	"authorUrl": "https://github.com/liyifan2004",
+	"isDesktopOnly": false
+}
