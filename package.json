@@ -7,6 +7,9 @@
 		"dev": "node esbuild.config.mjs",
 		"build": "node esbuild.config.mjs production",
 		"typecheck": "tsc -noEmit -skipLibCheck",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"verify": "npm run typecheck && npm run test && npm run build",
 		"sync": "node scripts/sync-to-vault.mjs"
 	},
 	"keywords": [
@@ -20,11 +23,12 @@
 	"author": "liyifan2004",
 	"license": "MIT",
 	"devDependencies": {
-		"@types/node": "^20.11.30",
+		"@types/node": "^22.0.0",
 		"builtin-modules": "^3.3.0",
-		"esbuild": "^0.20.2",
+		"esbuild": "^0.28.0",
 		"obsidian": "latest",
 		"tslib": "^2.6.2",
-		"typescript": "^5.4.5"
+		"typescript": "^5.4.5",
+		"vitest": "^5.0.1"
 	}
 }

@@ -48,12 +48,26 @@
 
 ```bash
 npm install
-npm run build
+npm run verify        # 类型检查 + 单元测试 + 构建，一条命令跑完
 npm run sync          # 复制到 D:\MyNotes\学-习\.obsidian\plugins\jev-inbox-router
 # 或指定别的库：node scripts/sync-to-vault.mjs "D:\MyNotes\另一个库"
 ```
 
 然后在 Obsidian 的「设置 → 第三方插件」里启用 JEV Inbox Router。
+
+## 开发与测试
+
+| 命令 | 作用 |
+|---|---|
+| `npm test` | 跑单元测试（vitest，161 个用例） |
+| `npm run test:watch` | 监听模式 |
+| `npm run typecheck` | `tsc --noEmit`，覆盖 `src/` 与 `test/` |
+| `npm run build` | esbuild 打包成 `main.js` |
+| `npm run verify` | 上面三件事一起跑 |
+
+测试不需要 Obsidian 本体：`test/mocks/obsidian.ts` 是 API 桩，`test/helpers/fake-vault.ts` 是内存版库（含 `renameFile` 与 `processFrontMatter` 的行为）。`vitest.config.mts` 把 `obsidian` 这个 import 指到桩上。
+
+覆盖范围：判断规则与双门槛（`rules.ts`）、判断块与 frontmatter 的读写（`note-writer.ts`）、JEV 请求构造与错误重试（`jev-client.ts`）、完整分流流程 / 缓存 / 撤销 / 同名冲突（`router.ts`）、设置迁移（`settings-normalize.ts`）。`main.ts` 是纯接线层（命令注册、状态栏、事件订阅），未做单元测试。
 
 ## 配置
 
@@ -71,9 +85,10 @@ JEV 不生成文本，只返回带概率的类型化答案（`choice` / `score` 
 
 ## 已知限制
 
-- 撤销记录只保留最近 10 次，且插件重启后仍可撤销（存在 data.json 里），但内容超过 2 万字的笔记不会回滚正文改动。
-- 每次判断会把笔记正文（最多 6000 字）发给 TypeSafe。介意的话不要开启自动分流。
-- 六个选项单选的原始概率天然偏低（0.3~0.6 属正常），不要拿它跟二分类的置信度直接比。
+- 撤销记录只保留最近 10 次，存在 `data.json` 里；内容超过 2 万字的笔记不会回滚正文改动，只回滚位置。
+- 每次判断会把笔记正文（最多 6000 字）连同你自己的 frontmatter 一起发给 TypeSafe。**插件自己写的判断块和 `jev-*` 字段不会发出去**——否则下一次判断会被上一次的结论带偏。介意的话不要开启自动分流。
+- 缓存指纹**只看正文**，不看 frontmatter。因此只改 frontmatter（标签、别名之类）不会触发重新判断。
+- 六个选项单选的原始概率天然偏低（0.3~0.6 属正常），不要拿它跟二分类的置信度直接比。插件用的是「被选中选项的概率」和「首选 ÷ 次选」两个数，不是模型自报的 `confidence`。
 
 ## License
 

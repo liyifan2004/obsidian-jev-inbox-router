@@ -1,6 +1,15 @@
 import { App, TFile, TFolder, normalizePath } from "obsidian";
 import { hashContent, JevClient, JevError } from "./jev-client";
-import { buildFrontmatterFields, buildRouteBlock, stripRouteBlock, upsertRouteBlock } from "./note-writer";
+import {
+	applyFrontmatterFields,
+	buildFrontmatterFields,
+	buildRouteBlock,
+	stripRouteBlock,
+	toJudgeFingerprintSource,
+	toJudgeInput,
+	upsertRouteBlock,
+} from "./note-writer";
+import { evaluateGate, isDeletionDecision, isInInboxPath, isTooShort, normalizeFolder } from "./rules";
 import type { CacheEntry, JevSettings, RouterDecision, UndoEntry } from "./types";
 
 /** 分流结果 */
@@ -34,14 +43,11 @@ export interface RouterHost {
 	beginSelfWrite(): void;
 }
 
-/** 分流被门槛拦下的原因 */
-interface Gate {
-	passed: boolean;
-	reason?: string;
-}
-
 export class InboxRouter {
-	constructor(private readonly app: App, private readonly host: RouterHost) {}
+	constructor(
+		private readonly app: App,
+		private readonly host: RouterHost
+	) {}
 
 	// ---------------------------------------------------------------- 路径工具
 
@@ -53,44 +59,47 @@ export class InboxRouter {
 		return folders.sort((a, b) => a.localeCompare(b));
 	}
 
+	/** 列出某个文件夹（含子文件夹）下的所有 Markdown 文件；folderPath 为空表示整个库 */
 	listMarkdownFiles(folderPath: string): TFile[] {
-		const folder = folderPath
-			? this.app.vault.getAbstractFileByPath(normalizePath(folderPath))
+		const clean = normalizeFolder(folderPath);
+		const root: TFolder | null = clean
+			? (() => {
+					const found = this.app.vault.getAbstractFileByPath(normalizePath(clean));
+					return found instanceof TFolder ? found : null;
+				})()
 			: this.app.vault.getRoot();
+
+		if (!root) return [];
+
 		const out: TFile[] = [];
-		if (folder instanceof TFolder) {
-			const walk = (dir: TFolder) => {
-				for (const child of dir.children) {
-					if (child instanceof TFile && child.extension === "md") out.push(child);
-					else if (child instanceof TFolder) walk(child);
+		const walk = (dir: TFolder) => {
+			for (const child of dir.children) {
+				if (child instanceof TFile) {
+					if (child.extension === "md") out.push(child);
+				} else if (child instanceof TFolder) {
+					walk(child);
 				}
-			};
-			walk(folder);
-		} else if (folderPath === "" || folderPath === "/") {
-			const walk = (dir: TFolder) => {
-				for (const child of dir.children) {
-					if (child instanceof TFile && child.extension === "md") out.push(child);
-					else if (child instanceof TFolder) walk(child);
-				}
-			};
-			walk(this.app.vault.getRoot());
-		}
+			}
+		};
+		walk(root);
 		return out;
 	}
 
 	/** 文件是否落在收件箱范围内 */
 	isInInbox(file: TFile, settings: JevSettings): boolean {
-		if (settings.watchScope === "vault") return true;
-		const folders = settings.inboxFolders.map((f) => normalizePath(f).replace(/\/+$/, ""));
-		return folders.some(
-			(folder) => folder !== "" && (file.path === folder || file.path.startsWith(`${folder}/`))
-		);
+		return isInInboxPath(file.path, settings);
+	}
+
+	/** 内容是否太短，不值得判断 */
+	tooShort(content: string, minChars: number): boolean {
+		return isTooShort(content, minChars);
 	}
 
 	async ensureFolder(folderPath: string): Promise<void> {
-		const path = normalizePath(folderPath).replace(/^\/+|\/+$/g, "");
+		const path = normalizeFolder(folderPath);
 		if (!path) return;
 		if (this.app.vault.getAbstractFileByPath(path)) return;
+
 		let current = "";
 		for (const part of path.split("/")) {
 			current = current ? `${current}/${part}` : part;
@@ -100,30 +109,13 @@ export class InboxRouter {
 		}
 	}
 
-	// ---------------------------------------------------------------- 判断
-
-	private getGate(decision: RouterDecision, settings: JevSettings): Gate {
-		if (decision.confidence < settings.confidenceThreshold) {
-			return {
-				passed: false,
-				reason: `置信度 ${Math.round(decision.confidence * 100)}% 低于门槛 ${Math.round(
-					settings.confidenceThreshold * 100
-				)}%`,
-			};
-		}
-		if (Number.isFinite(decision.margin) && decision.margin < settings.marginThreshold) {
-			return {
-				passed: false,
-				reason: `首选只比次选高 ${decision.margin.toFixed(2)} 倍，低于门槛 ${settings.marginThreshold}×`,
-			};
-		}
-		return { passed: true };
-	}
-
-	/** 读取正文（去掉 frontmatter），供 JEV 判断 */
-	private async readBody(file: TFile): Promise<string> {
+	/**
+	 * 送去给 JEV 的正文：剥掉自己写的判断块与 jev-* 字段。
+	 * 这样重新判断时既不会被上次的结论带偏，内容没变时缓存也能命中。
+	 */
+	private async readJudgeInput(file: TFile): Promise<{ raw: string; judgeInput: string }> {
 		const raw = await this.app.vault.cachedRead(file);
-		return raw;
+		return { raw, judgeInput: toJudgeInput(raw) };
 	}
 
 	/**
@@ -134,19 +126,15 @@ export class InboxRouter {
 		const client = this.host.getClient();
 		const fromPath = file.path;
 
-		const raw = await this.readBody(file);
-		const hash = hashContent(raw);
+		const { raw, judgeInput } = await this.readJudgeInput(file);
+		const hash = hashContent(toJudgeFingerprintSource(raw));
 
 		let decision: RouterDecision | null = null;
 		let fromCache = false;
 
 		if (!options.force) {
 			const cached = this.host.getCache(fromPath);
-			if (
-				cached &&
-				cached.hash === hash &&
-				Date.now() - cached.at < settings.cacheMinutes * 60_000
-			) {
+			if (cached && cached.hash === hash && Date.now() - cached.at < settings.cacheMinutes * 60_000) {
 				decision = cached.decision;
 				fromCache = true;
 			}
@@ -154,7 +142,7 @@ export class InboxRouter {
 
 		if (!decision) {
 			decision = await client.classify(
-				{ title: file.basename, path: fromPath, content: raw },
+				{ title: file.basename, path: fromPath, content: judgeInput },
 				settings.categories,
 				{ lowValueEnabled: settings.lowValueEnabled }
 			);
@@ -170,18 +158,15 @@ export class InboxRouter {
 
 		if (options.dryRun) return result;
 
-		// 缓存一份原始判断，后续只改内容不改结论时可复用
+		// 缓存这次判断，内容没变时下次直接复用
 		this.host.setCache(fromPath, { hash, at: Date.now(), decision });
 
 		// ---- 判定是否允许移动 ----
-		const isDeletion = decision.categoryKey === this.getDeletionKey(settings);
-		const gate = this.getGate(decision, settings);
-
-		let blockedReason: string | undefined;
 		const targetFolder = decision.targetFolder;
 		let allowMove = options.allowMove !== false;
+		let blockedReason: string | undefined;
 
-		if (isDeletion) {
+		if (isDeletionDecision(decision, settings)) {
 			if (settings.deletionHandling === "ignore") {
 				allowMove = false;
 				blockedReason = "该笔记被判为「应该删除」，当前设置是不处理";
@@ -191,6 +176,7 @@ export class InboxRouter {
 			}
 		}
 
+		const gate = evaluateGate(decision, settings);
 		if (!gate.passed) {
 			allowMove = false;
 			blockedReason = gate.reason;
@@ -210,28 +196,13 @@ export class InboxRouter {
 			);
 		}
 
+		// ---- 写 frontmatter ----
 		if (settings.writeFrontmatter) {
 			this.host.beginSelfWrite();
+			const fields = buildFrontmatterFields(decision, settings);
 			try {
-				const fields = buildFrontmatterFields(decision, settings);
 				await this.app.fileManager.processFrontMatter(file, (fm) => {
-					for (const field of fields) {
-						if (field.key === "tags") {
-							const existing: unknown = fm[field.key];
-							const list = Array.isArray(existing)
-								? existing.map(String)
-								: typeof existing === "string" && existing
-									? [existing]
-									: [];
-							const incoming = field.value as string[];
-							for (const t of incoming) {
-								if (!list.includes(t)) list.push(t);
-							}
-							fm[field.key] = list;
-						} else {
-							fm[field.key] = field.value;
-						}
-					}
+					applyFrontmatterFields(fm as Record<string, unknown>, fields);
 				});
 			} catch {
 				// frontmatter 不可解析时不阻塞分流
@@ -259,31 +230,22 @@ export class InboxRouter {
 		return result;
 	}
 
-	private getDeletionKey(settings: JevSettings): string {
-		// 约定：默认配置里 key 为 F 的分类是「应该删除」；找不到就退回最后一个分类
-		const byKey = settings.categories.find((c) => c.key === "F");
-		if (byKey) return byKey.key;
-		const byLabel = settings.categories.find((c) => c.label.includes("删除"));
-		if (byLabel) return byLabel.key;
-		return "";
-	}
-
 	/** 把文件移动到目标文件夹，处理同名冲突，返回最终路径 */
 	async moveFile(file: TFile, folder: string): Promise<string> {
-		const targetDir = normalizePath(folder ?? "").replace(/^\/+|\/+$/g, "");
-		const build = (dir: string, suffix: string) => {
+		const targetDir = normalizeFolder(folder);
+		const build = (suffix: string) => {
 			const name = `${file.basename}${suffix}.${file.extension}`;
-			return normalizePath(dir ? `${dir}/${name}` : name);
+			return normalizePath(targetDir ? `${targetDir}/${name}` : name);
 		};
 
-		let finalPath = build(targetDir, "");
+		let finalPath = build("");
 		if (finalPath === file.path) return file.path;
 
 		await this.ensureFolder(targetDir);
 
 		let i = 1;
 		while (this.app.vault.getAbstractFileByPath(finalPath) && i <= 100) {
-			finalPath = build(targetDir, ` ${i}`);
+			finalPath = build(` ${i}`);
 			i++;
 		}
 		if (finalPath === file.path) return file.path;
@@ -294,8 +256,7 @@ export class InboxRouter {
 
 	/** 手动把文件挪到指定文件夹（不重新判断） */
 	async moveTo(file: TFile, folder: string): Promise<string> {
-		const target = await this.moveFile(file, folder);
-		return target;
+		return this.moveFile(file, folder);
 	}
 
 	/** 移除文件里的判断块 */
@@ -315,22 +276,14 @@ export class InboxRouter {
 		}
 
 		if (entry.previousPath && entry.previousPath !== file.path) {
-			await this.ensureFolder(entry.previousPath.split("/").slice(0, -1).join("/"));
+			const dir = entry.previousPath.split("/").slice(0, -1).join("/");
+			await this.ensureFolder(dir);
 			await this.app.fileManager.renameFile(file, normalizePath(entry.previousPath));
 		}
 
 		this.host.invalidateCache(entry.path);
 		this.host.invalidateCache(entry.previousPath);
 		return true;
-	}
-
-	/** 内容是否太短，不值得判断 */
-	tooShort(content: string, minChars: number): boolean {
-		const text = content
-			.replace(/^---[\s\S]*?\n---\n?/, "")
-			.replace(/<!--[\s\S]*?-->/g, "")
-			.replace(/[#>*`\-\s\[\]()]/g, "");
-		return text.length < minChars;
 	}
 }
 

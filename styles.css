@@ -62,6 +62,21 @@
 	margin-block: 0.25em;
 }
 
+/* 判断信息是列表项，收紧一点，避免在 callout 里撑得太开 */
+.callout[data-callout="jev-route"] .callout-content ul {
+	margin: 0;
+	padding-inline-start: 1.15em;
+}
+
+.callout[data-callout="jev-route"] .callout-content li {
+	margin-block: 0.15em;
+	line-height: 1.5;
+}
+
+.callout[data-callout="jev-route"] .callout-content li::marker {
+	color: var(--text-faint);
+}
+
 details.jev-route-block {
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-s);
@@ -74,6 +89,16 @@ details.jev-route-block > summary {
 	cursor: pointer;
 	color: var(--text-muted);
 	font-weight: 600;
+}
+
+details.jev-route-block ul {
+	margin: 0.5em 0 0;
+	padding-inline-start: 1.15em;
+}
+
+details.jev-route-block li {
+	margin-block: 0.15em;
+	line-height: 1.5;
 }
 
 /* ------------------------------------------------------------ 判断弹窗 */
@@ -200,7 +225,6 @@ details.jev-route-block > summary {
 	color: var(--text-muted);
 }
 
-.jev-row.is-chosen .jev-prob-val,
 .jev-prob-row.is-chosen .jev-prob-val {
 	color: var(--text-normal);
 }

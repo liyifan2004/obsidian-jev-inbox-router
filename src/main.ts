@@ -4,7 +4,9 @@ import { JevClient, JevError } from "./jev-client";
 import { CategoryPickerModal, FolderPickerModal, JevDecisionModal } from "./modals";
 import { InboxRouter, type RouteResult, type RouterHost } from "./router";
 import { JevSettingTab } from "./settings-tab";
-import type { CacheEntry, CategoryConfig, JevSettings, RouterDecision, UndoEntry } from "./types";
+import { normalizeSettings } from "./settings-normalize";
+import { statusViewForRoute } from "./rules";
+import type { CacheEntry, JevSettings, RouterDecision, UndoEntry } from "./types";
 
 interface PersistedData {
 	settings: Partial<JevSettings>;
@@ -320,7 +322,11 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			this.timers.delete(file.path);
 			const current = this.app.vault.getAbstractFileByPath(file.path);
 			if (!(current instanceof TFile)) return;
-			void this.runRoute(current, { silent: true, quiet: true });
+			// 开了「自动分流前确认」时，这里只判断并弹窗，是否移动交给用户在弹窗里决定。
+			void this.runRoute(current, {
+				quiet: true,
+				dryRun: this.settings.autoRouteRequireConfirm,
+			});
 		}, this.settings.autoRouteDelayMs);
 
 		this.timers.set(file.path, timer);
@@ -333,11 +339,8 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		options: {
 			dryRun?: boolean;
 			force?: boolean;
-			silent?: boolean;
-			/** 自动触发时更安静：不弹通知，只更新状态栏 */
+			/** 自动触发时更安静：不弹通知，只更新状态栏与弹窗 */
 			quiet?: boolean;
-			/** 手动指定目标文件夹（跳过 JEV 判断） */
-			overrideFolder?: string;
 		} = {}
 	): Promise<RouteResult | null> {
 		if (this.busy.has(file.path)) return null;
@@ -353,11 +356,6 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		this.setStatus("busy", `分析中：${file.basename}`);
 
 		try {
-			if (options.overrideFolder !== undefined) {
-				const moved = await this.moveFileTo(file, options.overrideFolder, options.quiet ?? false);
-				return moved;
-			}
-
 			if (!options.force) {
 				const raw = await this.app.vault.cachedRead(file);
 				if (this.router.tooShort(raw, this.settings.minChars)) {
@@ -392,42 +390,38 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 
 	private report(result: RouteResult, options: { dryRun?: boolean; quiet?: boolean }): void {
 		const d = result.decision;
-		const color = this.settings.categories.find((c) => c.key === d.categoryKey)?.color;
-		const short =
-			this.settings.categories.find((c) => c.key === d.categoryKey)?.short ?? d.categoryLabel;
 
 		if (options.dryRun) {
-			this.setStatus("ok", `${short} ${Math.round(d.confidence * 100)}%`, color);
+			const category = this.settings.categories.find((c) => c.key === d.categoryKey);
+			this.setStatus(
+				"ok",
+				`${category?.short ?? d.categoryLabel} ${Math.round(d.confidence * 100)}%`,
+				category?.color
+			);
 			this.showDecisionModal(result);
 			return;
 		}
 
+		const view = statusViewForRoute({
+			decision: d,
+			settings: this.settings,
+			moved: result.moved,
+			blockedReason: result.blockedReason,
+		});
+		this.setStatus(view.kind, view.text, view.color);
+
+		if (options.quiet) return;
+
 		if (result.moved) {
-			this.setStatus(
-				"ok",
-				`${short} ${Math.round(d.confidence * 100)}% → ${d.targetFolder || "库根目录"}`,
-				color
+			new Notice(
+				`已分流：${d.categoryKey} ${d.categoryLabel}（${Math.round(
+					d.confidence * 100
+				)}%）→ ${d.targetFolder || "库根目录"}`,
+				5000
 			);
-			if (!options.quiet) {
-				new Notice(
-					`已分流：${d.categoryKey} ${d.categoryLabel}（${Math.round(
-						d.confidence * 100
-					)}%）→ ${d.targetFolder || "库根目录"}`,
-					5000
-				);
-			}
-			return;
+		} else if (result.blockedReason) {
+			new Notice(`已标记但未移动：${result.blockedReason}`, 8000);
 		}
-
-		if (result.blockedReason) {
-			this.setStatus("warn", `${short} ${Math.round(d.confidence * 100)}% 存疑`, color);
-			if (!options.quiet) {
-				new Notice(`已标记但未移动：${result.blockedReason}`, 8000);
-			}
-			return;
-		}
-
-		this.setStatus("warn", `${short} 已在目标位置`, color);
 	}
 
 	private async moveFileTo(file: TFile, folder: string, quiet = false): Promise<RouteResult | null> {
@@ -522,7 +516,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 				skipped++;
 				continue;
 			}
-			const result = await this.runRoute(current, { quiet: true, silent: true });
+			const result = await this.runRoute(current, { quiet: true });
 			if (!result) failed++;
 			else if (result.moved) moved++;
 			else blocked++;
@@ -598,40 +592,4 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			file
 		).open();
 	}
-}
-
-/**
- * 把持久化的设置补齐成完整的 JevSettings。
- * 分类按 key 合并，避免插件升级后丢掉用户已有配置。
- */
-function normalizeSettings(raw: Partial<JevSettings>): JevSettings {
-	const merged: JevSettings = {
-		...DEFAULT_SETTINGS,
-		...raw,
-		categories: Array.isArray(raw.categories) && raw.categories.length > 0
-			? raw.categories.map((c) => normalizeCategory(c))
-			: JSON.parse(JSON.stringify(DEFAULT_SETTINGS.categories)),
-		inboxFolders:
-			Array.isArray(raw.inboxFolders) && raw.inboxFolders.length > 0
-				? raw.inboxFolders
-				: DEFAULT_SETTINGS.inboxFolders.slice(),
-	};
-	if (!merged.apiUrl) merged.apiUrl = DEFAULT_SETTINGS.apiUrl;
-	if (!merged.model) merged.model = DEFAULT_SETTINGS.model;
-	return merged;
-}
-
-function normalizeCategory(raw: Partial<CategoryConfig>): CategoryConfig {
-	const key = typeof raw.key === "string" && raw.key ? raw.key : "?";
-	const fallback = DEFAULT_SETTINGS.categories.find((c) => c.key === key);
-	return {
-		key,
-		label: raw.label ?? fallback?.label ?? key,
-		short: raw.short ?? fallback?.short ?? raw.label ?? key,
-		description: raw.description ?? fallback?.description ?? "",
-		folder: typeof raw.folder === "string" ? raw.folder : (fallback?.folder ?? ""),
-		tag: raw.tag ?? fallback?.tag ?? "",
-		enabled: raw.enabled !== false,
-		color: raw.color ?? fallback?.color ?? "#7F8C99",
-	};
 }

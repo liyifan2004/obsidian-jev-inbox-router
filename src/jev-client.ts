@@ -38,6 +38,13 @@ export interface ClassifyOptions {
 	lowValueEnabled: boolean;
 }
 
+export interface JevClientOptions {
+	/** 重试的基础退避时间（毫秒）。测试里设成 0，避免拖慢用例。 */
+	retryBaseMs?: number;
+	/** 最多尝试几次（含首次） */
+	maxAttempts?: number;
+}
+
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -74,7 +81,16 @@ function explain(status: number, text: string): string {
 }
 
 export class JevClient {
-	constructor(private readonly getConfig: () => JevConfig) {}
+	private readonly retryBaseMs: number;
+	private readonly maxAttempts: number;
+
+	constructor(
+		private readonly getConfig: () => JevConfig,
+		options: JevClientOptions = {}
+	) {
+		this.retryBaseMs = options.retryBaseMs ?? 800;
+		this.maxAttempts = Math.max(1, options.maxAttempts ?? 3);
+	}
 
 	/** 调用 System One，返回一次判断结果 */
 	async classify(
@@ -135,7 +151,7 @@ export class JevClient {
 	): Promise<JevResponse> {
 		let lastError: JevError | null = null;
 
-		for (let attempt = 0; attempt < 3; attempt++) {
+		for (let attempt = 0; attempt < this.maxAttempts; attempt++) {
 			let status = 0;
 			let text = "";
 			let json: JevResponse | null = null;
@@ -179,7 +195,7 @@ export class JevClient {
 			if (!retriable) throw err;
 
 			lastError = err;
-			if (attempt < 2) await sleep(800 * (attempt + 1));
+			if (attempt < this.maxAttempts - 1) await sleep(this.retryBaseMs * (attempt + 1));
 		}
 
 		throw lastError ?? new JevError("JEV 请求失败");
