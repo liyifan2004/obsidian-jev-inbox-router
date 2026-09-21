@@ -69,6 +69,12 @@ npm run sync          # 复制到 D:\MyNotes\学-习\.obsidian\plugins\jev-inbox
 
 覆盖范围：判断规则与双门槛（`rules.ts`）、判断块与 frontmatter 的读写（`note-writer.ts`）、JEV 请求构造与错误重试（`jev-client.ts`）、完整分流流程 / 缓存 / 撤销 / 同名冲突（`router.ts`）、设置迁移（`settings-normalize.ts`）。`main.ts` 是纯接线层（命令注册、状态栏、事件订阅），未做单元测试。
 
+## 配套工具
+
+- `scripts/sync-to-vault.mjs` —— 把构建产物同步进 Obsidian 库
+- `scripts/gh-push.ps1` —— 一条命令把当前分支推到 GitHub，可选自动建私有库
+- `docs/github-push-from-agent.md` —— 为什么非交互环境下 `git push` 会静默失败，以及怎么绕过去
+
 ## 配置
 
 1. 设置 → JEV Inbox Router → **JEV 接口**：填入 TypeSafe 的 API Key（`console.typesafe.ai/settings/keys`）。点「测试」确认连通。
