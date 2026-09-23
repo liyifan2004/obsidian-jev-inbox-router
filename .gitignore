@@ -5,4 +5,6 @@ dist/
 data.json
 .hotreload
 .workbuddy/
+.claude/
+.agents/
 .obsidian/
