@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon.png" alt="JEV Inbox Router icon" width="96" />
+</p>
+
 # JEV Inbox Router
 
 [![Release](https://img.shields.io/github/v/release/liyifan2004/obsidian-jev-inbox-router?style=flat-square)](https://github.com/liyifan2004/obsidian-jev-inbox-router/releases)
