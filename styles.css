@@ -1,7 +1,59 @@
 /* ==========================================================================
    JEV Inbox Router
    全部使用 Obsidian 的 CSS 变量，自动跟随亮色 / 暗色主题。
+   视觉约定见 DESIGN.md：层级只靠字号 / 字重 / 间距 / 1px 发丝线；
+   分类色只做标识（≥8px 圆点、被选中项的进度条），永不进入文字层。
    ========================================================================== */
+
+/* ---------------------------------------------------- 插件自有的设计令牌 */
+
+:root {
+	/* color-mix 引用了 --jev-cat，必须有默认值：未定义会让整条声明在计算值阶段失效 */
+	--jev-cat: #7f8c99;
+	/* 亮色向文字色折算的比例。实算（亮色次级面 #f2f6f9 上最差分类 D）：
+	   50% → 3.67:1、55% → 3.32:1、59% → 3.05:1、60% → 2.98:1（首次跌破 3:1）。
+	   数学临界是 60%；55% 是留出余量的保守取值，不要调高。 */
+	--jev-cat-mix: 55%;
+	/* 非选中概率条的填充：--text-muted 对轨道 --background-modifier-border
+	   实算 5.07:1（亮）/ 6.03:1（暗），远好于 --text-faint 的 2.13:1 / 2.20:1 */
+	--jev-bar-idle: var(--text-muted);
+	/* callout 标题色（中性灰）。Obsidian 不提供 --color-accent-rgb 一类的 RGB 三元组，
+	   无法从主题强调色派生，故留一个可被主题覆盖的变量。固定单值无法两主题都过 4.5:1
+	   （见 contrast-audit.mjs [5]），所以按主题分别给值：
+	   亮色 #56606C 对白底 6.39:1；暗色 #B3BCC6 对 #1e1e1e 8.67:1。 */
+	--jev-callout-rgb: 86, 96, 108;
+}
+
+body.theme-dark {
+	--jev-cat-mix: 85%;
+	--jev-callout-rgb: 179, 188, 198;
+}
+
+/* 分类折算色：任意用户色都按主题向正文色折算后使用 */
+.jev-ink {
+	background-color: color-mix(in srgb, var(--jev-cat) var(--jev-cat-mix), var(--text-normal));
+}
+
+/* 不支持 color-mix 时退回原色（Obsidian 1.5+ 不需要，保留降级） */
+@supports not (background-color: color-mix(in srgb, red 50%, blue)) {
+	.jev-ink {
+		background-color: var(--jev-cat);
+	}
+}
+
+/* 标识点：形状与颜色分开，颜色统一走 .jev-ink */
+.jev-dot {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex: 0 0 auto;
+}
+
+/* .jev-dot 自身不设背景，颜色只由 .jev-ink 提供；这里补一条更明确的规则兜底 */
+.jev-dot.jev-ink {
+	background-color: color-mix(in srgb, var(--jev-cat) var(--jev-cat-mix), var(--text-normal));
+}
 
 /* ---------------------------------------------------------------- 状态栏 */
 
@@ -9,18 +61,35 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
+	min-height: 22px;
+	padding: 2px 6px;
+	margin: -2px -6px;
+	border-radius: var(--radius-s);
 	cursor: pointer;
+	color: var(--text-muted);
 	font-variant-numeric: tabular-nums;
-	transition: color 120ms ease;
 }
 
 .jev-status:hover {
+	background: var(--background-modifier-hover);
 	color: var(--text-normal);
 }
 
+.jev-status:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 1px;
+}
+
+.jev-status.is-idle {
+	color: var(--text-muted);
+}
+
 .jev-status.is-busy {
-	color: var(--text-accent);
-	animation: jev-pulse 1.4s ease-in-out infinite;
+	color: var(--text-normal);
+}
+
+.jev-status.is-ok {
+	color: var(--text-normal);
 }
 
 .jev-status.is-warn {
@@ -31,13 +100,40 @@
 	color: var(--text-error, #e5534b);
 }
 
-.jev-dot {
-	display: inline-block;
+.jev-status .jev-dot {
 	width: 8px;
 	height: 8px;
-	border-radius: 50%;
-	background: var(--text-faint);
-	flex: 0 0 auto;
+}
+
+/* hover / focus 时才露出「查看判断详情」提示 */
+.jev-status .jev-hint {
+	opacity: 0;
+	margin-left: 2px;
+	color: var(--text-muted);
+	transition: opacity 120ms ease;
+}
+
+.jev-status:hover .jev-hint,
+.jev-status:focus-visible .jev-hint {
+	opacity: 1;
+}
+
+/* 触摸端没有 hover：提示常显，避免「查看判断详情」成为不可发现的手段（DESIGN.md §8） */
+body.is-mobile .jev-status .jev-hint {
+	opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.jev-status .jev-hint {
+		transition: none;
+	}
+}
+
+/* 呼吸动画只作用于圆点，且尊重「减少动效」 */
+@media (prefers-reduced-motion: no-preference) {
+	.jev-status.is-busy .jev-dot {
+		animation: jev-pulse 1.4s ease-in-out infinite;
+	}
 }
 
 @keyframes jev-pulse {
@@ -50,10 +146,31 @@
 	}
 }
 
+/* 撤销入口：独立的状态栏项，只在成功移动后的窗口内存在 */
+.jev-undo {
+	color: var(--text-muted);
+}
+
+.jev-undo:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+/* 接受入口：独立的状态栏项，只在「有未处理建议」的窗口内存在 */
+.jev-accept {
+	color: var(--text-normal);
+	font-weight: 600;
+}
+
+.jev-accept:hover {
+	background: var(--background-modifier-hover);
+}
+
 /* ------------------------------------------------------ 笔记内的判断块 */
 
 .callout[data-callout="jev-route"] {
-	--callout-color: 92, 141, 255;
+	/* 中性兜底；callout 颜色不再等于任何分类色，避免把「标识」误用成「主题色」 */
+	--callout-color: var(--jev-callout-rgb, 127, 140, 153);
 	--callout-icon: lucide-inbox;
 	font-size: var(--font-ui-smaller);
 }
@@ -73,6 +190,7 @@
 	line-height: 1.5;
 }
 
+/* li::marker 属纯装饰，允许用 --text-faint */
 .callout[data-callout="jev-route"] .callout-content li::marker {
 	color: var(--text-faint);
 }
@@ -107,92 +225,116 @@ details.jev-route-block li {
 	--jev-row-gap: 10px;
 }
 
-.jev-verdict {
+/* 结论行：一屏的主角，去底色，靠字号 / 字重 / 发丝线分层 */
+.jev-conclusion {
 	display: flex;
-	align-items: center;
-	gap: 10px;
-	padding: 12px 14px;
-	margin-bottom: 16px;
-	border-radius: var(--radius-m);
-	background: var(--background-secondary);
-	font-size: 1.05em;
-	font-weight: 600;
+	align-items: baseline;
+	gap: 8px;
 	flex-wrap: wrap;
+	padding-bottom: 16px;
+	border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.jev-verdict-cat {
+.jev-conclusion-cat {
 	display: inline-flex;
 	align-items: center;
-	gap: 7px;
+	gap: 8px;
 }
 
-.jev-verdict .jev-arrow {
+.jev-conclusion .jev-dot {
+	width: 9px;
+	height: 9px;
+}
+
+.jev-conclusion .jev-cat-name {
+	font-size: var(--font-ui-medium);
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.jev-conclusion .jev-target {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 8px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.jev-conclusion .jev-target .jev-path {
+	color: var(--text-normal);
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 40em;
+}
+
+.jev-arrow {
 	color: var(--text-faint);
 }
 
-.jev-verdict-folder {
-	font-family: var(--font-monospace);
-	font-size: 0.9em;
-	padding: 2px 8px;
-	border-radius: var(--radius-s);
-	background: var(--background-modifier-hover);
-	color: var(--text-accent);
+/* 键值行：dt/dd 语义结构，压成一行，随字号与缩放自然换行 */
+.jev-meta-line {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 18px;
+	padding: 12px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+	font-size: var(--font-ui-small);
 }
 
-.jev-meta-grid {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-	gap: 10px;
-	margin-bottom: 20px;
+.jev-meta-line .jev-kv {
+	display: flex;
+	gap: 6px;
+	align-items: baseline;
 }
 
-.jev-meta-cell {
-	padding: 10px 12px;
-	border-radius: var(--radius-s);
-	background: var(--background-secondary);
-	border: 1px solid var(--background-modifier-border);
+.jev-meta-line .jev-kv > dt {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin: 0;
 }
 
-.jev-meta-label {
+.jev-meta-line .jev-kv > dd {
+	margin: 0;
+	color: var(--text-normal);
+	font-variant-numeric: tabular-nums;
+}
+
+/* 尾注：模型 / 时间 / token */
+.jev-foot {
+	padding: 12px 0 16px;
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
-	margin-bottom: 4px;
 }
 
-.jev-meta-value {
-	font-size: var(--font-ui-small);
-	color: var(--text-normal);
-	line-height: 1.35;
-	word-break: break-word;
+.jev-foot .jev-foot-sep {
+	color: var(--text-faint);
 }
 
+/* 概率分布 */
 .jev-chart {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
-	margin-bottom: 20px;
+	gap: 4px;
+	margin-bottom: 16px;
 }
 
 .jev-prob-row {
 	display: grid;
-	grid-template-columns: 18px 68px 1fr 44px;
+	grid-template-columns: 16px max-content minmax(60px, 1fr) 42px;
 	align-items: center;
-	gap: 8px;
+	gap: 10px;
+	min-height: 26px;
 	font-size: var(--font-ui-smaller);
-}
-
-.jev-prob-row.is-chosen {
-	font-weight: 700;
-}
-
-.jev-prob-row.is-chosen .jev-prob-track {
-	box-shadow: 0 0 0 1px var(--interactive-accent);
 }
 
 .jev-prob-key {
 	font-family: var(--font-monospace);
-	font-weight: 700;
+	font-weight: 600;
 	text-align: center;
+	color: var(--text-muted);
 }
 
 .jev-prob-label {
@@ -202,21 +344,30 @@ details.jev-route-block li {
 	color: var(--text-muted);
 }
 
-.jev-prob-row.is-chosen .jev-prob-label {
-	color: var(--text-normal);
-}
-
 .jev-prob-track {
-	height: 8px;
-	border-radius: 4px;
+	height: 6px;
+	border-radius: var(--radius-s);
 	background: var(--background-modifier-border);
 	overflow: hidden;
 }
 
 .jev-prob-fill {
 	height: 100%;
-	border-radius: 4px;
-	transition: width 260ms ease;
+	border-radius: var(--radius-s);
+	background-color: var(--jev-bar-idle);
+	transition: width 200ms ease;
+}
+
+/* 只有被选中项的条上色（唯一使用分类色的图形） */
+.jev-prob-row.is-chosen .jev-prob-fill {
+	background-color: color-mix(in srgb, var(--jev-cat) var(--jev-cat-mix), var(--text-normal));
+}
+
+.jev-prob-row.is-chosen .jev-prob-key,
+.jev-prob-row.is-chosen .jev-prob-label,
+.jev-prob-row.is-chosen .jev-prob-val {
+	color: var(--text-normal);
+	font-weight: 600;
 }
 
 .jev-prob-val {
@@ -225,10 +376,13 @@ details.jev-route-block li {
 	color: var(--text-muted);
 }
 
-.jev-prob-row.is-chosen .jev-prob-val {
-	color: var(--text-normal);
+@media (prefers-reduced-motion: reduce) {
+	.jev-prob-fill {
+		transition: none;
+	}
 }
 
+/* 操作行：一个 CTA + 一个次级 + 一个 ⋯ 图标按钮 */
 .jev-actions {
 	border-top: 1px solid var(--background-modifier-border);
 	padding-top: 8px;
@@ -236,7 +390,15 @@ details.jev-route-block li {
 
 .jev-actions .setting-item {
 	border: none;
-	padding-top: 4px;
+	padding: 8px 0 0;
+}
+
+.jev-more-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 30px;
+	min-height: 30px;
 }
 
 /* ------------------------------------------------------------ 选择列表 */
@@ -244,38 +406,62 @@ details.jev-route-block li {
 .jev-picker-list {
 	max-height: 55vh;
 	overflow-y: auto;
-	margin-top: 10px;
+	margin-top: 12px;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 }
 
-.jev-picker-item {
+/* 真控件行：button 元素，键盘可达，命中区 ≥44px */
+.jev-row {
 	display: flex;
 	align-items: center;
 	gap: 10px;
-	padding: 9px 12px;
+	width: 100%;
+	min-height: 44px;
+	padding: 6px 12px;
 	cursor: pointer;
+	background: none;
+	border: 0;
+	border-radius: 0;
 	border-bottom: 1px solid var(--background-modifier-border);
+	font: inherit;
+	color: inherit;
+	text-align: left;
 }
 
-.jev-picker-item:last-child {
+.jev-row:last-child {
 	border-bottom: none;
 }
 
-.jev-picker-item:hover {
+.jev-row:hover {
 	background: var(--background-modifier-hover);
 }
 
-.jev-picker-title {
-	font-size: var(--font-ui-small);
-	color: var(--text-normal);
+.jev-row:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: -2px;
 }
 
-.jev-picker-sub {
+.jev-row .jev-path {
+	color: var(--text-normal);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.jev-row .jev-picker-title {
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+}
+
+.jev-row .jev-picker-sub {
 	margin-left: auto;
 	font-family: var(--font-monospace);
 	font-size: var(--font-ui-smaller);
-	color: var(--text-faint);
+	color: var(--text-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .jev-search,
@@ -284,10 +470,10 @@ details.jev-route-block li {
 }
 
 .jev-empty {
-	padding: 16px;
+	padding: 24px 12px;
 	text-align: center;
-	color: var(--text-faint);
-	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
 }
 
 /* -------------------------------------------------------------- 设置页 */
@@ -298,7 +484,7 @@ details.jev-route-block li {
 }
 
 .jev-settings .jev-hint {
-	color: var(--text-faint);
+	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 	margin-top: -6px;
 }
@@ -313,20 +499,57 @@ details.jev-route-block li {
 .jev-cat-card {
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
-	background: var(--background-secondary);
 	overflow: hidden;
-}
-
-.jev-cat-card.is-disabled {
-	opacity: 0.5;
 }
 
 .jev-cat-head {
 	display: flex;
 	align-items: center;
 	gap: 10px;
-	padding: 10px 12px;
+	min-height: 44px;
+	padding: 6px 10px;
 	flex-wrap: wrap;
+}
+
+/* 独立的折叠按钮（不能把整行做成 <button>：行内含输入控件与开关） */
+.jev-chev-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 44px;
+	margin: -6px 0 -6px -6px;
+	padding: 0;
+	flex: 0 0 auto;
+	background: none;
+	border: 0;
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.jev-chev-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.jev-chev-btn:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: -2px;
+}
+
+.jev-chev-btn .svg-icon {
+	transition: transform 150ms ease;
+}
+
+.jev-chev-btn.is-open .svg-icon {
+	transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.jev-chev-btn .svg-icon {
+		transition: none;
+	}
 }
 
 .jev-cat-key {
@@ -341,12 +564,13 @@ details.jev-route-block li {
 .jev-cat-label-input {
 	flex: 0 1 180px;
 	font-weight: 600;
+	color: var(--text-normal);
 }
 
 .jev-cat-folder-preview {
 	font-family: var(--font-monospace);
 	font-size: var(--font-ui-smaller);
-	color: var(--text-faint);
+	color: var(--text-muted);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -360,6 +584,7 @@ details.jev-route-block li {
 .jev-toggle-label {
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
+	cursor: pointer;
 }
 
 .jev-cat-body {
@@ -368,15 +593,141 @@ details.jev-route-block li {
 }
 
 .jev-cat-body .setting-item {
-	padding: 10px 0;
+	padding: 12px 0;
 }
 
-.jev-icon-btn {
-	font-size: var(--font-ui-smaller);
+/* 禁用态：不再用 opacity（会跌破 4.5:1，并把「停用」与「不重要」混淆） */
+.jev-cat-card.is-disabled .jev-cat-label-input {
+	color: var(--text-muted);
+}
+
+/* 标识点转中性灰；inline --jev-cat 用 !important 覆盖 */
+.jev-cat-card.is-disabled .jev-dot.jev-ink {
+	--jev-cat: var(--text-faint) !important;
 }
 
 .jev-color-input {
 	width: 44px;
 	padding: 2px;
 	height: 30px;
+}
+
+.jev-color-hex {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+/* ------------------------------------------------- 设置页 · 组织方式预设 */
+
+.jev-preset-list {
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	overflow: hidden;
+	margin-bottom: 12px;
+}
+
+/* 选中态：非颜色线索（字重 600 + aria-pressed），底色只用悬停面 */
+.jev-preset-row.is-selected {
+	background: var(--background-modifier-hover);
+}
+
+.jev-preset-row.is-selected .jev-preset-name {
+	font-weight: 600;
+}
+
+.jev-preset-main {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+	flex: 1 1 auto;
+}
+
+.jev-preset-name {
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+}
+
+.jev-preset-desc {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.45;
+}
+
+.jev-preset-meta {
+	margin-left: auto;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	flex: 0 0 auto;
+}
+
+/* 手机上描述与元信息允许换行堆叠 */
+@media (max-width: 375px) {
+	.jev-preset-row {
+		flex-wrap: wrap;
+	}
+
+	.jev-preset-meta {
+		margin-left: 18px;
+		white-space: normal;
+	}
+}
+
+/* ------------------------------------------------------------ 响应式 */
+
+/* 平板：键值行换行、设置项改上下堆叠 */
+@media (max-width: 768px) {
+	.jev-meta-line {
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.jev-settings .setting-item {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.jev-settings .setting-item-info {
+		margin-right: 0;
+	}
+
+	.jev-settings .setting-item-control {
+		width: 100%;
+		justify-content: flex-start;
+		margin-top: 8px;
+	}
+
+	.jev-settings .setting-item-control input,
+	.jev-settings .setting-item-control textarea,
+	.jev-settings .setting-item-control select {
+		width: 100%;
+	}
+}
+
+/* 手机：行高与命中区 44px；路径省略优先 */
+@media (max-width: 375px) {
+	.jev-row {
+		min-height: 44px;
+	}
+
+	.jev-chev-btn {
+		width: 44px;
+		height: 44px;
+	}
+
+	.jev-more-btn {
+		min-width: 44px;
+		min-height: 44px;
+	}
+
+	.jev-actions .setting-item-control button {
+		min-height: 44px;
+	}
 }

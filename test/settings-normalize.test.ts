@@ -135,4 +135,61 @@ describe("normalizeSettings", () => {
 		expect(settings.blockPlacement).toBe(DEFAULT_SETTINGS.blockPlacement);
 		expect(settings.blockStyle).toBe(DEFAULT_SETTINGS.blockStyle);
 	});
+
+	// ---- v0.2 迁移：indexFolder / moveOnJudge / previousCategories ----
+
+	it("缺新字段时按迁移规则补齐", () => {
+		const settings = normalizeSettings({});
+		expect(settings.indexFolder).toBe("Inbox");
+		expect(settings.moveOnJudge).toBe(false);
+		expect(settings.previousCategories).toBeNull();
+	});
+
+	it("老用户开了自动分流：moveOnJudge 迁移为 true，行为不变", () => {
+		const settings = normalizeSettings({ autoRouteEnabled: true });
+		expect(settings.moveOnJudge).toBe(true);
+	});
+
+	it("老用户没开自动分流：moveOnJudge 为 false（建议模式）", () => {
+		const settings = normalizeSettings({ autoRouteEnabled: false });
+		expect(settings.moveOnJudge).toBe(false);
+	});
+
+	it("indexFolder 缺失时回退到旧收件箱配置的第一项", () => {
+		const settings = normalizeSettings({ inboxFolders: ["收集", "临时"] });
+		expect(settings.indexFolder).toBe("收集");
+	});
+
+	it("indexFolder 写坏（空串 / 非字符串）时走回退链：inboxFolders[0] → Inbox", () => {
+		expect(normalizeSettings({ indexFolder: "  ", inboxFolders: ["收件"] }).indexFolder).toBe(
+			"收件"
+		);
+		expect(normalizeSettings({ indexFolder: "  " }).indexFolder).toBe("Inbox");
+		expect(
+			normalizeSettings({ indexFolder: 42 as unknown as string, inboxFolders: ["备选"] })
+				.indexFolder
+		).toBe("备选");
+	});
+
+	it("显式写过的 moveOnJudge 优先于 autoRouteEnabled 迁移", () => {
+		const settings = normalizeSettings({ autoRouteEnabled: true, moveOnJudge: false });
+		expect(settings.moveOnJudge).toBe(false);
+	});
+
+	it("previousCategories 快照被保留并逐条补齐（允许半成品条目）", () => {
+		const settings = normalizeSettings({
+			previousCategories: [
+				{ key: "X", label: "旧分类" },
+			] as unknown as never,
+		});
+		expect(settings.previousCategories).toHaveLength(1);
+		expect(settings.previousCategories?.[0]).toMatchObject({ key: "X", label: "旧分类" });
+		expect(settings.previousCategories?.[0].enabled).toBe(true);
+	});
+
+	it("previousCategories 类型不对时视为没有快照", () => {
+		expect(
+			normalizeSettings({ previousCategories: "oops" as unknown as never }).previousCategories
+		).toBeNull();
+	});
 });

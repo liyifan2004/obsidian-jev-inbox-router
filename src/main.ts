@@ -2,10 +2,11 @@ import { Menu, Notice, Plugin, TFile } from "obsidian";
 import { DEFAULT_SETTINGS } from "./constants";
 import { JevClient, JevError } from "./jev-client";
 import { CategoryPickerModal, FolderPickerModal, JevDecisionModal } from "./modals";
+import { buildRouteBlock, upsertRouteBlock } from "./note-writer";
 import { InboxRouter, type RouteResult, type RouterHost } from "./router";
 import { JevSettingTab } from "./settings-tab";
 import { normalizeSettings } from "./settings-normalize";
-import { statusViewForRoute } from "./rules";
+import { normalizeFolder, statusViewForRoute, statusViewForSuggestion } from "./rules";
 import type { CacheEntry, JevSettings, RouterDecision, UndoEntry } from "./types";
 
 interface PersistedData {
@@ -27,6 +28,14 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 	private client!: JevClient;
 	private statusEl: HTMLElement | null = null;
 	private statusTimer: number | null = null;
+	/** 独立的撤销状态栏项：只在「刚刚成功移动过文件」后的窗口内存在 */
+	private undoStatusEl: HTMLElement | null = null;
+	private undoStatusTimer: number | null = null;
+	/** 独立的「接受」状态栏项：只在「刚给出建议且未处理」的窗口内存在 */
+	private acceptStatusEl: HTMLElement | null = null;
+	private acceptStatusTimer: number | null = null;
+	/** 最近一条未处理建议：状态栏「接受」与 accept-last-suggestion 命令都用它 */
+	private lastSuggestion: { decision: RouterDecision; file: TFile } | null = null;
 	private cacheMap = new Map<string, CacheEntry>();
 	private undoStack: UndoEntry[] = [];
 	private timers = new Map<string, number>();
@@ -52,12 +61,27 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		this.registerMenus();
 		this.registerVaultEvents();
 
-		this.addRibbonIcon("inbox", "JEV：扫描收件箱并分流", () => void this.scanInbox());
+		this.addRibbonIcon("inbox", "JEV：扫描收件箱并处理", () => void this.scanInbox());
 	}
 
 	onunload(): void {
 		for (const timer of this.timers.values()) window.clearTimeout(timer);
 		this.timers.clear();
+		if (this.statusTimer !== null) window.clearTimeout(this.statusTimer);
+		this.statusTimer = null;
+		if (this.undoStatusTimer !== null) window.clearTimeout(this.undoStatusTimer);
+		this.undoStatusTimer = null;
+		if (this.acceptStatusTimer !== null) window.clearTimeout(this.acceptStatusTimer);
+		this.acceptStatusTimer = null;
+		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
+		this.saveTimer = null;
+		// 显式移除状态栏节点，不依赖 Obsidian 自动回收
+		this.statusEl?.detach();
+		this.statusEl = null;
+		this.undoStatusEl?.detach();
+		this.undoStatusEl = null;
+		this.acceptStatusEl?.detach();
+		this.acceptStatusEl = null;
 	}
 
 	// ------------------------------------------------------- RouterHost 实现
@@ -158,13 +182,28 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		if (this.settings.statusBarEnabled) {
 			if (!this.statusEl) {
 				this.statusEl = this.addStatusBarItem();
-				this.statusEl.addEventListener("click", () => this.showLastDecision());
 				this.statusEl.addClass("jev-status");
+				// 状态栏主项是真控件：可聚焦、Enter/Space 可激活
+				this.statusEl.setAttribute("role", "button");
+				this.statusEl.setAttribute("tabindex", "0");
+				this.statusEl.setAttribute("aria-label", "查看最近一次判断详情");
+				this.statusEl.addEventListener("click", () => this.showLastDecision());
+				this.statusEl.addEventListener("keydown", (event) => {
+					if (event.key === "Enter" || event.key === " ") {
+						event.preventDefault();
+						this.showLastDecision();
+					}
+				});
 			}
 			this.setStatus("ready", "就绪");
-		} else if (this.statusEl) {
-			this.statusEl.detach();
-			this.statusEl = null;
+		} else {
+			if (this.statusEl) {
+				this.statusEl.detach();
+				this.statusEl = null;
+			}
+			this.hideUndoStatus();
+			this.hideAcceptStatus();
+			this.lastSuggestion = null;
 		}
 	}
 
@@ -180,16 +219,139 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		const el = this.statusEl;
 		if (!el) return;
 
-		el.removeClass("is-busy", "is-ok", "is-warn", "is-error");
+		el.removeClass("is-idle", "is-busy", "is-ok", "is-warn", "is-error");
 		el.addClass(`is-${kind}`);
+		if (kind === "ready") el.addClass("is-idle");
 		el.empty();
-		const dot = el.createSpan({ cls: "jev-dot" });
-		dot.style.background = color ?? "";
-		el.createSpan({ text: `JEV · ${text}` });
+
+		const dot = el.createSpan({ cls: "jev-dot jev-ink" });
+		// 分类色只写进 --jev-cat，由 CSS 按主题折算；未提供时用 :root 的中性默认值
+		if (color) dot.style.setProperty("--jev-cat", color);
+		// 就绪态只留「JEV」；结果态直接显示内容（不再有常驻「JEV ·」前缀）
+		el.createSpan({ cls: "jev-status-text", text: kind === "ready" ? "JEV" : text });
+		el.createSpan({ cls: "jev-hint", text: "查看判断详情" });
 
 		if ((kind === "ok" || kind === "warn" || kind === "error") && this.settings.statusBarClearMs > 0) {
 			this.statusTimer = window.setTimeout(() => this.setStatus("ready", "就绪"), this.settings.statusBarClearMs);
 		}
+	}
+
+	/** 成功移动后在 statusBarClearMs 窗口内提供独立的「撤销」入口 */
+	private showUndoStatus(): void {
+		if (!this.settings.statusBarEnabled) return;
+
+		if (!this.undoStatusEl) {
+			const el = this.addStatusBarItem();
+			el.addClass("jev-status", "jev-undo");
+			el.setAttribute("role", "button");
+			el.setAttribute("tabindex", "0");
+			el.setAttribute("aria-label", "撤销上一次分流");
+			el.setText("撤销");
+			const activate = () => void this.undoLast();
+			el.addEventListener("click", activate);
+			el.addEventListener("keydown", (event) => {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					activate();
+				}
+			});
+			this.undoStatusEl = el;
+		}
+
+		if (this.undoStatusTimer !== null) window.clearTimeout(this.undoStatusTimer);
+		const windowMs = this.settings.statusBarClearMs > 0 ? this.settings.statusBarClearMs : 12000;
+		this.undoStatusTimer = window.setTimeout(() => this.hideUndoStatus(), windowMs);
+	}
+
+	private hideUndoStatus(): void {
+		if (this.undoStatusTimer !== null) {
+			window.clearTimeout(this.undoStatusTimer);
+			this.undoStatusTimer = null;
+		}
+		if (this.undoStatusEl) {
+			this.undoStatusEl.detach();
+			this.undoStatusEl = null;
+		}
+	}
+
+	/**
+	 * 建议模式下：在 statusBarClearMs 窗口内提供独立的「接受」入口。
+	 * 与撤销项同一套模式：创建/显示/detach/置 null，不允许节点残留。
+	 */
+	private showAcceptStatus(ariaLabel: string): void {
+		if (!this.settings.statusBarEnabled) return;
+
+		if (!this.acceptStatusEl) {
+			const el = this.addStatusBarItem();
+			el.addClass("jev-status", "jev-accept");
+			el.setAttribute("role", "button");
+			el.setAttribute("tabindex", "0");
+			el.setText("接受");
+			const activate = () => void this.acceptSuggestion();
+			el.addEventListener("click", activate);
+			el.addEventListener("keydown", (event) => {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					activate();
+				}
+			});
+			this.acceptStatusEl = el;
+		}
+		this.acceptStatusEl.setAttribute("aria-label", ariaLabel);
+
+		if (this.acceptStatusTimer !== null) window.clearTimeout(this.acceptStatusTimer);
+		const windowMs = this.settings.statusBarClearMs > 0 ? this.settings.statusBarClearMs : 12000;
+		this.acceptStatusTimer = window.setTimeout(() => this.hideAcceptStatus(), windowMs);
+	}
+
+	private hideAcceptStatus(): void {
+		if (this.acceptStatusTimer !== null) {
+			window.clearTimeout(this.acceptStatusTimer);
+			this.acceptStatusTimer = null;
+		}
+		if (this.acceptStatusEl) {
+			this.acceptStatusEl.detach();
+			this.acceptStatusEl = null;
+		}
+	}
+
+	/** 一键接受建议：用户亲手点的接受等同人工确认，直接移动（复用 moveFileTo 的已移动状态 + 撤销项） */
+	private async acceptSuggestion(): Promise<void> {
+		const suggestion = this.lastSuggestion;
+		if (!suggestion) return;
+		this.lastSuggestion = null;
+		this.hideAcceptStatus();
+
+		const file = this.app.vault.getAbstractFileByPath(suggestion.file.path);
+		if (!(file instanceof TFile)) {
+			new Notice("找不到这条笔记（可能已被移动或删除）。", 6000);
+			return;
+		}
+		const result = await this.moveFileTo(file, suggestion.decision.targetFolder);
+
+		// 接受移动后回写判断块为「已移动」，不留「（未移动）」的旧结论
+		if (result?.moved && this.settings.blockEnabled) {
+			const moved = this.app.vault.getAbstractFileByPath(result.toPath);
+			if (moved instanceof TFile) {
+				try {
+					const block = buildRouteBlock(suggestion.decision, this.settings, { moved: true });
+					this.beginSelfWrite();
+					await this.app.vault.process(moved, (data) =>
+						upsertRouteBlock(data, block, this.settings.blockPlacement)
+					);
+				} catch {
+					// 回写失败不影响移动结果
+				}
+			}
+		}
+	}
+
+	/** 当前文件是否已在目标文件夹里（无需移动） */
+	private isAlreadyAtTarget(currentPath: string, targetFolder: string): boolean {
+		const at = normalizeFolder(currentPath);
+		const goal = normalizeFolder(targetFolder);
+		if (goal === "") return !at.includes("/");
+		return at === goal || at.startsWith(`${goal}/`);
 	}
 
 	// ---------------------------------------------------------------- 命令
@@ -197,11 +359,22 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 	private registerCommands(): void {
 		this.addCommand({
 			id: "route-current-note",
-			name: "判断当前笔记并分流",
+			name: "判断当前笔记并给出去向建议",
 			checkCallback: (checking) => {
 				const file = this.activeMarkdownFile();
 				if (!file) return false;
-				if (!checking) void this.runRoute(file, { force: true });
+				if (!checking) void this.runRoute(file, { force: true, suggest: true });
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "route-current-note-move",
+			name: "判断当前笔记并直接移动",
+			checkCallback: (checking) => {
+				const file = this.activeMarkdownFile();
+				if (!file) return false;
+				if (!checking) void this.runRoute(file, { force: true, suggest: false });
 				return true;
 			},
 		});
@@ -219,8 +392,18 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 
 		this.addCommand({
 			id: "scan-inbox",
-			name: "扫描收件箱并批量分流",
+			name: "扫描收件箱并批量处理",
 			callback: () => void this.scanInbox(),
+		});
+
+		this.addCommand({
+			id: "accept-last-suggestion",
+			name: "接受上一次建议并移动笔记",
+			checkCallback: (checking) => {
+				if (!this.lastSuggestion) return false;
+				if (!checking) void this.acceptSuggestion();
+				return true;
+			},
 		});
 
 		this.addCommand({
@@ -254,9 +437,9 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		const addItems = (menu: Menu, file: TFile) => {
 			menu.addItem((item) =>
 				item
-					.setTitle("JEV：判断并分流")
+					.setTitle("JEV：判断并给出去向建议")
 					.setIcon("inbox")
-					.onClick(() => void this.runRoute(file, { force: true }))
+					.onClick(() => void this.runRoute(file, { force: true, suggest: true }))
 			);
 			menu.addItem((item) =>
 				item
@@ -341,6 +524,13 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			force?: boolean;
 			/** 自动触发时更安静：不弹通知，只更新状态栏与弹窗 */
 			quiet?: boolean;
+			/**
+			 * 建议/移动模式的显式指定：
+			 * true  = 判断后不动文件，状态栏给建议 + 一键接受；
+			 * false = 判断达标后直接移动（v0.1 行为）；
+			 * 省略  = 按设置 moveOnJudge 决定（默认建议模式）。
+			 */
+			suggest?: boolean;
 		} = {}
 	): Promise<RouteResult | null> {
 		if (this.busy.has(file.path)) return null;
@@ -350,6 +540,13 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			new Notice("请在 设置 → JEV Inbox Router 里填写 API Key。", 8000);
 			return null;
 		}
+
+		// 新判断产生时，先清掉上一次的接受项与撤销项，避免状态栏残留旧建议
+		const suggestionMode =
+			options.dryRun !== true && (options.suggest ?? !this.settings.moveOnJudge);
+		this.lastSuggestion = null;
+		this.hideAcceptStatus();
+		this.hideUndoStatus();
 
 		this.busy.add(file.path);
 		this.suppressUntil = Date.now() + 5000;
@@ -367,6 +564,8 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			const result = await this.router.route(file, {
 				dryRun: options.dryRun,
 				force: options.force,
+				// 建议模式：只判断不动文件（判断块 / frontmatter 照常写，结果照常进缓存）
+				allowMove: suggestionMode ? false : undefined,
 			});
 
 			const after = this.app.vault.getAbstractFileByPath(result.toPath);
@@ -374,7 +573,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 				result,
 				file: after instanceof TFile ? after : file,
 			};
-			this.report(result, options);
+			this.report(result, options, suggestionMode);
 			return result;
 		} catch (error) {
 			const message = error instanceof JevError ? error.message : String(error);
@@ -388,7 +587,11 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		}
 	}
 
-	private report(result: RouteResult, options: { dryRun?: boolean; quiet?: boolean }): void {
+	private report(
+		result: RouteResult,
+		options: { dryRun?: boolean; quiet?: boolean },
+		suggestionMode: boolean
+	): void {
 		const d = result.decision;
 
 		if (options.dryRun) {
@@ -402,6 +605,12 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			return;
 		}
 
+		// 建议模式：不动文件，状态栏给建议 + 一键接受
+		if (suggestionMode && !result.moved) {
+			this.reportSuggestion(result);
+			return;
+		}
+
 		const view = statusViewForRoute({
 			decision: d,
 			settings: this.settings,
@@ -409,6 +618,8 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			blockedReason: result.blockedReason,
 		});
 		this.setStatus(view.kind, view.text, view.color);
+		// 自动分流（quiet）也要有就地退路：先挂上撤销入口，再决定是否发通知
+		if (result.moved) this.showUndoStatus();
 
 		if (options.quiet) return;
 
@@ -421,6 +632,32 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			);
 		} else if (result.blockedReason) {
 			new Notice(`已标记但未移动：${result.blockedReason}`, 8000);
+		}
+	}
+
+	/** 建议模式的结果呈现：目标 ≠ 当前位置时给建议 + 接受项；已在目标位置则只提示 */
+	private reportSuggestion(result: RouteResult): void {
+		const d = result.decision;
+		const file = this.lastResult?.file ?? null;
+		const currentPath = result.toPath || file?.path || "";
+
+		if (this.isAlreadyAtTarget(currentPath, d.targetFolder)) {
+			this.lastSuggestion = null;
+			this.hideAcceptStatus();
+			const view = statusViewForSuggestion({
+				decision: d,
+				settings: this.settings,
+				currentPath,
+			});
+			this.setStatus(view.kind, view.text, view.color);
+			return;
+		}
+
+		const view = statusViewForSuggestion({ decision: d, settings: this.settings });
+		this.setStatus(view.kind, view.text, view.color);
+		if (file) {
+			this.lastSuggestion = { decision: d, file };
+			this.showAcceptStatus(`接受建议：移动到 ${d.targetFolder || "库根目录"}`);
 		}
 	}
 
@@ -455,6 +692,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			if (result.moved) {
 				this.pushUndo({ path: target, previousPath: fromPath, previousContent: null, at: Date.now() });
 				this.setStatus("ok", `已移到 ${folder || "库根目录"}`);
+				this.showUndoStatus();
 				if (!quiet) new Notice(`已移动到 ${folder || "库根目录"}`);
 			} else {
 				this.setStatus("ready", "已经在目标文件夹");
@@ -499,13 +737,16 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		const notice = new Notice("", 0);
 		let index = 0;
 		let moved = 0;
+		let suggested = 0;
 		let blocked = 0;
 		let failed = 0;
 		let skipped = 0;
+		// 建议模式下批量扫描只判断不移动（runRoute 按 moveOnJudge 自动进入建议流）
+		const suggestionMode = !this.settings.moveOnJudge;
 
 		for (const file of files) {
 			index++;
-			notice.setMessage(`JEV 分流中… ${index}/${files.length}\n${file.path}`);
+			notice.setMessage(`JEV 处理中… ${index}/${files.length}\n${file.path}`);
 			const current = this.app.vault.getAbstractFileByPath(file.path);
 			if (!(current instanceof TFile)) {
 				skipped++;
@@ -519,16 +760,22 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			const result = await this.runRoute(current, { quiet: true });
 			if (!result) failed++;
 			else if (result.moved) moved++;
+			else if (suggestionMode) suggested++;
 			else blocked++;
 			await new Promise((resolve) => window.setTimeout(resolve, 150));
 		}
 
 		notice.hide();
 		new Notice(
-			`扫描完成：共 ${index} 篇 · 移动 ${moved} · 仅标记 ${blocked} · 跳过 ${skipped} · 失败 ${failed}`,
+			suggestionMode
+				? `扫描完成：共 ${index} 篇 · 已给出建议 ${suggested} 条 · 跳过 ${skipped} · 失败 ${failed}`
+				: `扫描完成：共 ${index} 篇 · 移动 ${moved} · 仅标记 ${blocked} · 跳过 ${skipped} · 失败 ${failed}`,
 			9000
 		);
-		this.setStatus("ok", `扫描完成 ${moved} 篇已移动`);
+		this.setStatus(
+			"ok",
+			suggestionMode ? `扫描完成，已给出建议 ${suggested} 条` : `扫描完成 ${moved} 篇已移动`
+		);
 	}
 
 	// ---------------------------------------------------------------- 撤销
@@ -548,6 +795,8 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			new Notice(`撤销失败：找不到 ${entry.path}（可能已被移动或删除）。`, 8000);
 			this.setStatus("error", "撤销失败");
 		}
+		// 无论成败都立刻收起撤销入口，不依赖 12s 定时器回收
+		this.hideUndoStatus();
 		void this.persist();
 	}
 

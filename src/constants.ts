@@ -99,6 +99,12 @@ export const DEFAULT_SETTINGS: JevSettings = {
 
 	watchScope: "inbox",
 	inboxFolders: ["Inbox"],
+	// index 目录：JEV 的监听与建议来源（与 inboxFolders 保持同步）
+	indexFolder: "Inbox",
+	// 默认「建议模式」：判断后不动文件，状态栏给建议 + 一键接受
+	moveOnJudge: false,
+	// 应用预设前的分类快照，null = 没有
+	previousCategories: null,
 
 	// 默认关闭自动分流：先手动试几次，确认判断可信再打开。
 	autoRouteEnabled: false,

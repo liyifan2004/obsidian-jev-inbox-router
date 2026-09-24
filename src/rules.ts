@@ -114,3 +114,40 @@ export function statusViewForRoute(input: {
 	}
 	return { kind: "warn", color, text: `${short} 已在目标位置` };
 }
+
+/**
+ * 建议模式的状态栏视图：判断后不动文件，只给建议；一键接受由 main.ts 负责。
+ *
+ * 与 statusViewForRoute 的区别：这里没有「是否已移动」的概念。
+ * 双门槛只决定建议的标记（过门槛 ok / 未过 warn 存疑），不再拦截建议本身——
+ * 双门槛只用来拦「无人值守的自动移动」，用户亲手点的接受等同人工确认。
+ *
+ * currentPath 提供时才能识别「已在目标位置」：此时主流程据此不显示接受项。
+ */
+export function statusViewForSuggestion(input: {
+	decision: RouterDecision;
+	settings: JevSettings;
+	/** 当前文件路径；提供时才判断「无需移动」 */
+	currentPath?: string;
+}): StatusView {
+	const { decision, settings, currentPath } = input;
+	const category = settings.categories.find((c) => c.key === decision.categoryKey);
+	const short = category?.short || decision.categoryLabel;
+	const color = category?.color ?? "#7F8C99";
+	const target = decision.targetFolder || "库根目录";
+
+	if (typeof currentPath === "string" && currentPath.trim() !== "") {
+		const at = normalizeFolder(currentPath);
+		const goal = normalizeFolder(decision.targetFolder);
+		const atTarget =
+			goal === "" ? !at.includes("/") : at === goal || at.startsWith(`${goal}/`);
+		if (atTarget) {
+			return { kind: "ok", color, text: `已在 ${goal || "库根目录"}` };
+		}
+	}
+
+	const passed = evaluateGate(decision, settings).passed;
+	return passed
+		? { kind: "ok", color, text: `建议 ${short} ${pct(decision.confidence)} → ${target}` }
+		: { kind: "warn", color, text: `建议 ${short} ${pct(decision.confidence)} 存疑 → ${target}` };
+}

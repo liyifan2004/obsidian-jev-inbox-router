@@ -148,6 +148,8 @@ export class PluginSettingTab {
 export class Modal {
 	contentEl: HTMLElement = undefined as unknown as HTMLElement;
 	titleEl: HTMLElement = undefined as unknown as HTMLElement;
+	modalEl: HTMLElement = undefined as unknown as HTMLElement;
+	scope = {};
 
 	constructor(public app: App) {}
 
@@ -156,6 +158,43 @@ export class Modal {
 	}
 
 	close(): void {
+		/* noop */
+	}
+
+	onOpen(): void {
+		/* noop */
+	}
+
+	onClose(): void {
+		/* noop */
+	}
+}
+
+/**
+ * 与真实 Obsidian 结构兼容的最小 SuggestModal 桩。
+ * 只为「导入模块不会在 import 阶段炸」而存在，不参与断言。
+ */
+export class SuggestModal<T> extends Modal {
+	inputEl: HTMLInputElement = undefined as unknown as HTMLInputElement;
+	resultContainerEl: HTMLElement = undefined as unknown as HTMLElement;
+	limit = 100;
+	emptyStateText = "No results found.";
+	constructor(app: App) {
+		super(app);
+	}
+	setPlaceholder(_placeholder: string): void {
+		/* noop */
+	}
+	setInstructions(_instructions: unknown): void {
+		/* noop */
+	}
+	getSuggestions(_query: string): T[] | Promise<T[]> {
+		return [];
+	}
+	renderSuggestion(_item: T, _el: HTMLElement): void {
+		/* noop */
+	}
+	onChooseSuggestion(_item: T, _evt: MouseEvent | KeyboardEvent): void {
 		/* noop */
 	}
 }
@@ -220,10 +259,45 @@ export class Notice {
 	}
 }
 
-export class Menu {
-	addItem(): this {
+export class MenuItem {
+	setTitle(_title: string): this {
 		return this;
 	}
+
+	setIcon(_icon: string): this {
+		return this;
+	}
+
+	setSection(_section: string): this {
+		return this;
+	}
+
+	onClick(_callback: (evt: MouseEvent | KeyboardEvent) => unknown): this {
+		return this;
+	}
+}
+
+export class Menu {
+	addItem(_callback?: (item: MenuItem) => void): this {
+		return this;
+	}
+
+	showAtMouseEvent(_evt: MouseEvent): this {
+		return this;
+	}
+
+	showAtPosition(_position: { x: number; y: number }): this {
+		return this;
+	}
+
+	hide(): void {
+		/* noop */
+	}
+}
+
+/** 与真实 Obsidian 一致：给元素挂一个 Lucide 图标。桩里什么都不做。 */
+export function setIcon(_el: HTMLElement, _iconId: string): void {
+	/* noop */
 }
 
 export class MarkdownView {

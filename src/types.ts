@@ -50,8 +50,19 @@ export interface JevSettings {
 
 	/** 监听范围 */
 	watchScope: WatchScope;
-	/** 收件箱文件夹列表 */
+	/** 收件箱文件夹列表（高级用法；设置页只暴露 indexFolder，两者保持同步） */
 	inboxFolders: string[];
+	/** index 目录：JEV 的监听与建议来源，等价于收件箱概念 */
+	indexFolder: string;
+
+	/**
+	 * 判断后的处置方式：
+	 * false = 建议模式（默认）：判断后不动文件，状态栏给建议 + 一键接受；
+	 * true  = 判断达标后直接移动（v0.1 的行为）。
+	 */
+	moveOnJudge: boolean;
+	/** 应用预设前的分类快照；null = 没有可还原的快照 */
+	previousCategories: CategoryConfig[] | null;
 
 	/** 是否自动分流 */
 	autoRouteEnabled: boolean;

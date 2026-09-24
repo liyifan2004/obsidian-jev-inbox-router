@@ -7,6 +7,7 @@ import {
 	normalizeFolder,
 	resolveDeletionKey,
 	statusViewForRoute,
+	statusViewForSuggestion,
 } from "../src/rules";
 import { makeDecision, makeSettings } from "./helpers/fixtures";
 
@@ -233,6 +234,74 @@ describe("statusViewForRoute", () => {
 			moved: true,
 		});
 		expect(view.text).toBe("待办事项 48% → 要做的事");
+		expect(view.color).toBe("#7F8C99");
+	});
+});
+
+describe("statusViewForSuggestion", () => {
+	it("过双门槛时给 ok 建议，指向目标文件夹", () => {
+		const view = statusViewForSuggestion({
+			decision: makeDecision(),
+			settings: makeSettings(),
+		});
+		expect(view.kind).toBe("ok");
+		expect(view.text).toBe("建议 待办 48% → 要做的事");
+		expect(view.color).toBe("#FFC53D");
+	});
+
+	it("未过门槛也给建议，但标记存疑（门槛只拦自动移动，不拦建议）", () => {
+		const view = statusViewForSuggestion({
+			decision: makeDecision({ confidence: 0.3 }),
+			settings: makeSettings(),
+		});
+		expect(view.kind).toBe("warn");
+		expect(view.text).toBe("建议 待办 30% 存疑 → 要做的事");
+	});
+
+	it("目标是库根目录时文案写清楚", () => {
+		const view = statusViewForSuggestion({
+			decision: makeDecision({ targetFolder: "" }),
+			settings: makeSettings(),
+		});
+		expect(view.text).toBe("建议 待办 48% → 库根目录");
+	});
+
+	it("已经在目标文件夹里时提示无需移动", () => {
+		const view = statusViewForSuggestion({
+			decision: makeDecision(),
+			settings: makeSettings(),
+			currentPath: "要做的事/明天的安排.md",
+		});
+		expect(view.kind).toBe("ok");
+		expect(view.text).toBe("已在 要做的事");
+	});
+
+	it("目标为库根目录且文件就在库根时同样提示", () => {
+		const view = statusViewForSuggestion({
+			decision: makeDecision({ targetFolder: "" }),
+			settings: makeSettings(),
+			currentPath: "根上的笔记.md",
+		});
+		expect(view.text).toBe("已在 库根目录");
+	});
+
+	it("文件在别的文件夹时不算已在目标位置", () => {
+		const view = statusViewForSuggestion({
+			decision: makeDecision(),
+			settings: makeSettings(),
+			currentPath: "Inbox/明天的安排.md",
+		});
+		expect(view.text).toBe("建议 待办 48% → 要做的事");
+	});
+
+	it("分类已从设置里删掉时退回分类全名与中性色", () => {
+		const settings = makeSettings();
+		settings.categories = settings.categories.filter((c) => c.key !== "D");
+		const view = statusViewForSuggestion({
+			decision: makeDecision(),
+			settings,
+		});
+		expect(view.text).toBe("建议 待办事项 48% → 要做的事");
 		expect(view.color).toBe("#7F8C99");
 	});
 });

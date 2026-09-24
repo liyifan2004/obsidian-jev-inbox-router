@@ -4,6 +4,8 @@ dist/
 .DS_Store
 data.json
 .hotreload
+.build-info.txt
+.vitest-log.txt
 .workbuddy/
 .claude/
 .agents/

@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JEV Inbox Router · UI 改版对照预览</title>
+<style>
+/* ============================================================
+   预览外壳：始终跟随 IDE 暗色，用来承载「插件的两种主题」
+   ============================================================ */
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#111213;color:#e7e7e8;
+  font:15px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.page{max-width:1280px;margin:0 auto;padding:36px 24px 110px}
+.top{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap;
+  padding-bottom:18px;border-bottom:1px solid #26282b}
+h1{margin:0;font-size:21px;font-weight:600;letter-spacing:0}
+.meta{margin:7px 0 0;font-size:13px;color:#8b8b8f}
+.seg{display:inline-flex;border:1px solid #33363a;border-radius:8px;overflow:hidden;background:#191a1c}
+.seg button{background:none;border:0;color:#a9a9ad;padding:8px 16px;font-size:13px;cursor:pointer;
+  font-family:inherit;transition:background 120ms ease,color 120ms ease}
+.seg button[aria-pressed="true"]{background:#2c2e31;color:#fff}
+.seg button:hover{color:#fff}
+.disclaimer{margin:22px 0 0;padding:12px 14px;border:1px solid #33363a;border-left:2px solid #6b6bd6;
+  border-radius:6px;background:#16181a;color:#9a9aa0;font-size:12.5px;line-height:1.7}
+
+section.demo{margin-top:44px}
+.demo-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+.demo-head h2{margin:0;font-size:15px;font-weight:600;color:#fff;letter-spacing:0}
+.demo-head .why{margin:0;font-size:12.5px;color:#8b8b8f}
+.finding{margin:0 0 14px;font-size:12.5px;color:#9a9aa0;line-height:1.75;max-width:92ch}
+.finding b{color:#d5d5d8;font-weight:600}
+.pill{display:inline-block;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600;
+  vertical-align:1px;margin-right:6px}
+.pill.p0{background:#3a1d1d;color:#ff8f8f;border:1px solid #5c2b2b}
+.pill.p1{background:#3a3120;color:#ffd28a;border:1px solid #5c4a24}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+@media (max-width:900px){.pair{grid-template-columns:1fr}}
+.cell{border:1px solid #26282b;border-radius:10px;overflow:hidden;background:#151719}
+.cell > .tag{padding:7px 13px;font-size:11.5px;letter-spacing:.04em;color:#8b8b8f;
+  background:#1b1e20;border-bottom:1px solid #26282b}
+.cell > .tag.ok{color:#8fd4a8}
+.cell > .box{padding:16px}
+.cell .cap{margin:12px 0 0;font-size:11.5px;color:#7f8085;line-height:1.7}
+
+/* ============================================================
+   以下变量近似 Obsidian 默认主题，用于在浏览器里还原插件界面。
+   这不是 Obsidian 实机截图，仅用于对比设计差异。
+   ============================================================ */
+.stage.theme-dark{
+  --background-primary:#1e1e1e; --background-primary-alt:#1a1a1a;
+  --background-secondary:#161616; --background-secondary-alt:#262626;
+  --background-modifier-border:#333333; --background-modifier-hover:rgba(255,255,255,.067);
+  --text-normal:#dcddde; --text-muted:#b3b3b3; --text-faint:#666666;
+  --text-accent:#8f7ff2; --interactive-accent:#7f6df2; --text-warning:#e0b23c; --text-error:#e5534b;
+  --modal-background:#1e1e1e;
+  --radius-s:4px; --radius-m:8px;
+  --font-ui-smaller:11px; --font-ui-small:13px; --font-ui-medium:15px;
+  --font-monospace:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  --mix-base:var(--text-normal); --mix-w:85%;
+}
+.stage.theme-light{
+  --background-primary:#ffffff; --background-primary-alt:#fafafa;
+  --background-secondary:#f2f6f9; --background-secondary-alt:#eef2f6;
+  --background-modifier-border:#e0e0e0; --background-modifier-hover:rgba(0,0,0,.05);
+  --text-normal:#2e3338; --text-muted:#5c5c5c; --text-faint:#9a9a9a;
+  --text-accent:#6c56c4; --interactive-accent:#6c56c4; --text-warning:#9a6b00; --text-error:#c0392b;
+  --modal-background:#ffffff;
+  --radius-s:4px; --radius-m:8px;
+  --font-ui-smaller:11px; --font-ui-small:13px; --font-ui-medium:15px;
+  --font-monospace:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  --mix-base:var(--text-normal); --mix-w:55%;
+}
+.stage{color:var(--text-normal)}
+.surface{background:var(--modal-background);border:1px solid var(--background-modifier-border);
+  border-radius:var(--radius-m);padding:18px;font-size:var(--font-ui-small)}
+.btn{font-family:inherit;font-size:var(--font-ui-small);line-height:1.4;padding:6px 13px;cursor:pointer;
+  border-radius:var(--radius-s);border:1px solid var(--background-modifier-border);
+  background:var(--background-primary-alt);color:var(--text-normal)}
+.btn:hover{background:var(--background-modifier-hover)}
+.btn.cta{background:var(--interactive-accent);border-color:var(--interactive-accent);color:#fff;font-weight:600}
+.btn.icon{padding:6px 9px;display:inline-flex;align-items:center;justify-content:center}
+.btn:focus-visible,button:focus-visible,a:focus-visible,[tabindex]:focus-visible{
+  outline:2px solid var(--interactive-accent);outline-offset:2px}
+.mono{font-family:var(--font-monospace)}
+
+/* ===================== 现状（before）===================== */
+.old-modal h2{margin:0 0 14px;font-size:1.32em;font-weight:700;line-height:1.3}
+.old-verdict{display:flex;align-items:center;gap:10px;padding:12px 14px;margin-bottom:16px;
+  border-radius:var(--radius-m);background:var(--background-secondary);font-size:1.05em;font-weight:600;flex-wrap:wrap}
+.old-dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:var(--text-faint)}
+.old-arrow{color:var(--text-faint)}
+.old-pill{font-family:var(--font-monospace);font-size:.9em;padding:2px 8px;border-radius:var(--radius-s);
+  background:var(--background-modifier-hover);color:var(--text-accent)}
+.old-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:20px}
+.old-cell{padding:10px 12px;border-radius:var(--radius-s);background:var(--background-secondary);
+  border:1px solid var(--background-modifier-border)}
+.old-cell .l{font-size:var(--font-ui-smaller);color:var(--text-muted);margin-bottom:4px}
+.old-cell .v{font-size:var(--font-ui-small);line-height:1.35;word-break:break-word}
+.old-h3{margin:0 0 8px;font-size:1.05em;font-weight:700}
+.old-chart{display:flex;flex-direction:column;gap:6px;margin-bottom:20px}
+.old-row{display:grid;grid-template-columns:18px 68px 1fr 44px;align-items:center;gap:8px;
+  font-size:var(--font-ui-smaller)}
+.old-row.chosen{font-weight:700}
+.old-row .k{font-family:var(--font-monospace);font-weight:700;text-align:center}
+.old-row .lb{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}
+.old-row.chosen .lb{color:var(--text-normal)}
+.old-track{height:8px;border-radius:4px;background:var(--background-modifier-border);overflow:hidden}
+.old-row.chosen .old-track{box-shadow:0 0 0 1px var(--interactive-accent)}
+.old-fill{height:100%;border-radius:4px}
+.old-row .p{text-align:right;font-variant-numeric:tabular-nums;color:var(--text-muted)}
+.old-row.chosen .p{color:var(--text-normal)}
+.old-actions{border-top:1px solid var(--background-modifier-border);padding-top:10px;display:flex;gap:8px;flex-wrap:wrap}
+.old-input{width:100%;font-family:var(--font-monospace);font-size:var(--font-ui-smaller);
+  background:#fff;color:#222;border:1px solid #767676;border-radius:2px;padding:2px 3px}
+.old-list{margin-top:10px;border:1px solid var(--background-modifier-border);border-radius:var(--radius-m);overflow:hidden}
+.old-item{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;
+  border-bottom:1px solid var(--background-modifier-border);font-size:var(--font-ui-small)}
+.old-item:last-child{border-bottom:none}
+.old-item:hover{background:var(--background-modifier-hover)}
+.old-item .sub{margin-left:auto;font-family:var(--font-monospace);font-size:var(--font-ui-smaller);color:var(--text-faint)}
+.old-card{border:1px solid var(--background-modifier-border);border-radius:var(--radius-m);
+  background:var(--background-secondary);overflow:hidden}
+.old-card.dis{opacity:.5}
+.old-head{display:flex;align-items:center;gap:10px;padding:10px 12px;flex-wrap:wrap}
+.old-key{font-family:var(--font-monospace);font-weight:700;font-size:var(--font-ui-smaller);color:var(--text-muted);min-width:14px}
+.old-label{flex:0 1 180px;font-weight:600;font-family:inherit;font-size:var(--font-ui-small);
+  background:#fff;color:#222;border:1px solid #767676;border-radius:2px;padding:2px 4px}
+.old-preview{font-family:var(--font-monospace);font-size:var(--font-ui-smaller);color:var(--text-faint);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:22em}
+.old-spacer{flex:1 1 auto}
+.old-tgl{font-size:var(--font-ui-smaller);color:var(--text-muted)}
+.old-body{padding:0 12px 4px;border-top:1px solid var(--background-modifier-border)}
+.old-si{display:grid;grid-template-columns:1fr 260px;gap:12px;align-items:start;padding:10px 0}
+.old-si .n{font-size:var(--font-ui-small);font-weight:600}
+.old-si .d{font-size:var(--font-ui-smaller);color:var(--text-muted);margin-top:3px}
+.old-sel{font-family:inherit;font-size:var(--font-ui-small);background:#fff;color:#222;
+  border:1px solid #767676;border-radius:2px;padding:2px 4px;width:100%}
+
+/* ===================== 建议（after）===================== */
+.new .title{margin:0 0 14px;font-size:var(--font-ui-medium);font-weight:600;line-height:1.35;color:var(--text-normal)}
+.ink{background:color-mix(in srgb,var(--jev-cat) var(--mix-w),var(--mix-base))}
+.ink-text{color:color-mix(in srgb,var(--jev-cat) var(--mix-w),var(--mix-base))}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.dot.lg{width:9px;height:9px}
+/* 结论行：一行，无底色 */
+.verdict{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+  padding-bottom:14px;border-bottom:1px solid var(--background-modifier-border)}
+.verdict .cat{font-size:var(--font-ui-medium);font-weight:600}
+.verdict .to{color:var(--text-muted);font-size:var(--font-ui-small)}
+.verdict .to .path{color:var(--text-normal)}
+.verdict .mark{margin-left:auto;font-size:var(--font-ui-smaller);color:var(--text-muted)}
+/* 元信息：一行键值 + 一行弱化尾注 */
+.metaline{display:flex;flex-wrap:wrap;gap:4px 18px;padding:12px 0;
+  border-bottom:1px solid var(--background-modifier-border);font-size:var(--font-ui-small)}
+.kv{display:flex;align-items:baseline;gap:6px;min-width:0}
+.kv .k{color:var(--text-muted);font-size:var(--font-ui-smaller)}
+.kv .v{color:var(--text-normal);font-variant-numeric:tabular-nums}
+.foot{padding:10px 0 16px;font-size:var(--font-ui-smaller);color:var(--text-muted);
+  font-variant-numeric:tabular-nums}
+/* 概率分布：只有被选中的那条上色 */
+.chart{display:flex;flex-direction:column;gap:2px;padding:14px 0 6px}
+.prow{display:grid;grid-template-columns:16px max-content minmax(60px,1fr) 42px;
+  align-items:center;gap:10px;min-height:26px;font-size:var(--font-ui-smaller)}
+.prow .k{font-family:var(--font-monospace);color:var(--text-faint);text-align:center}
+.prow .lb{color:var(--text-muted);white-space:nowrap;max-width:14em;overflow:hidden;text-overflow:ellipsis}
+.prow .track{height:6px;border-radius:3px;background:var(--background-modifier-border);overflow:hidden}
+.prow .fill{height:100%;border-radius:3px;background:var(--text-faint);
+  transition:width 200ms ease}
+.prow .p{text-align:right;font-variant-numeric:tabular-nums;color:var(--text-muted)}
+.prow.chosen .k{color:var(--text-normal);font-weight:600}
+.prow.chosen .lb{color:var(--text-normal);font-weight:600}
+.prow.chosen .p{color:var(--text-normal);font-weight:600}
+.prow.chosen .fill{background:color-mix(in srgb,var(--jev-cat) var(--mix-w),var(--mix-base))}
+.actions{display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap}
+.actions .push{margin-left:auto}
+/* 选择器：真控件 */
+.search{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;
+  border:1px solid var(--background-modifier-border);border-radius:var(--radius-s);
+  background:var(--background-primary-alt);color:var(--text-muted)}
+.search input{flex:1;border:0;background:none;outline:none;font-family:inherit;
+  font-size:var(--font-ui-small);color:var(--text-normal)}
+.search input::placeholder{color:var(--text-faint)}
+.search:focus-within{border-color:var(--interactive-accent);box-shadow:0 0 0 1px var(--interactive-accent)}
+.rows{margin-top:10px;border:1px solid var(--background-modifier-border);
+  border-radius:var(--radius-s);overflow:hidden;max-height:232px;overflow-y:auto}
+.row{display:flex;align-items:center;gap:10px;min-height:44px;padding:6px 12px;cursor:pointer;
+  border-bottom:1px solid var(--background-modifier-border);font-size:var(--font-ui-small);color:var(--text-normal)}
+.row:last-child{border-bottom:none}
+.row:hover,.row:focus-visible{background:var(--background-modifier-hover)}
+.row .path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .mark{margin-left:auto;display:flex;align-items:center;gap:6px;
+  font-size:var(--font-ui-smaller);color:var(--text-muted);flex:0 0 auto}
+.empty{padding:22px 12px;text-align:center;color:var(--text-muted);font-size:var(--font-ui-small)}
+/* 设置：分类卡 */
+.catcard{border:1px solid var(--background-modifier-border);border-radius:var(--radius-s);
+  background:var(--background-primary);overflow:hidden}
+.catcard.dis .labelname{color:var(--text-muted)}
+.cathead{display:flex;align-items:center;gap:10px;min-height:44px;padding:6px 10px;cursor:pointer;
+  flex-wrap:wrap;width:100%;background:none;border:0;font-family:inherit;text-align:left}
+.cathead:hover{background:var(--background-modifier-hover)}
+.chev{display:inline-flex;color:var(--text-muted);transition:transform 150ms ease}
+.chev.open{transform:rotate(90deg)}
+.cathead .key{font-family:var(--font-monospace);font-size:var(--font-ui-smaller);color:var(--text-muted)}
+.cathead .labelname{font-size:var(--font-ui-small);font-weight:600;color:var(--text-normal)}
+.cathead .to{margin-left:auto;font-size:var(--font-ui-smaller);color:var(--text-muted);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:24em}
+.catbody{border-top:1px solid var(--background-modifier-border);padding:2px 12px 6px}
+.si{display:grid;grid-template-columns:1fr 240px;gap:14px;align-items:center;
+  padding:12px 0;border-bottom:1px solid var(--background-modifier-border)}
+.si:last-child{border-bottom:none}
+.si.stack{align-items:start}
+.si .n{font-size:var(--font-ui-small);font-weight:600;color:var(--text-normal)}
+.si .d{font-size:var(--font-ui-smaller);color:var(--text-muted);margin-top:3px;line-height:1.55}
+.field{width:100%;height:32px;padding:0 9px;font-family:inherit;font-size:var(--font-ui-small);
+  color:var(--text-normal);background:var(--background-primary-alt);
+  border:1px solid var(--background-modifier-border);border-radius:var(--radius-s)}
+.field:focus{outline:none;border-color:var(--interactive-accent);box-shadow:0 0 0 1px var(--interactive-accent)}
+textarea.field{height:auto;padding:7px 9px;resize:vertical;line-height:1.55}
+/* Obsidian 风格开关 */
+.toggle{width:40px;height:22px;border-radius:11px;border:1px solid var(--background-modifier-border);
+  background:var(--background-modifier-border);position:relative;cursor:pointer;flex:0 0 auto;padding:0}
+.toggle::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
+  background:var(--text-muted);transition:left 150ms ease,background 150ms ease}
+.toggle[aria-checked="true"]{background:var(--interactive-accent);border-color:var(--interactive-accent)}
+.toggle[aria-checked="true"]::after{left:20px;background:#fff}
+.toggle:focus-visible{outline:2px solid var(--interactive-accent);outline-offset:2px}
+/* 状态栏 */
+.statusbar{display:flex;align-items:center;gap:14px;background:var(--background-secondary);
+  border:1px solid var(--background-modifier-border);border-radius:var(--radius-s);
+  padding:8px 12px;font-size:var(--font-ui-smaller)}
+.statusbar .item{display:inline-flex;align-items:center;gap:6px}
+.statusbar .faux{color:var(--text-faint)}
+.sb-old{display:inline-flex;align-items:center;gap:6px;color:var(--text-normal);cursor:pointer}
+.sb-old:hover{color:var(--text-normal)}
+.sb-new{display:inline-flex;align-items:center;gap:6px;cursor:pointer;border-radius:3px;
+  color:var(--text-normal);padding:2px 4px;margin:-2px -4px}
+.sb-new:hover{background:var(--background-modifier-hover);color:var(--text-normal)}
+.sb-new .hint{color:var(--text-muted);opacity:0;transition:opacity 120ms ease}
+.sb-new:hover .hint{opacity:1}
+.sb-new.idle{color:var(--text-muted)}
+.sb-new .txt{font-variant-numeric:tabular-nums}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+.sb-new .dot.breathe{animation:pulse 1.4s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){
+  .sb-new .dot.breathe{animation:none}
+  .prow .fill,.chev,.toggle::after{transition:none}
+}
+.rowhint{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:14px;font-size:11.5px;color:#7f8085}
+.rowhint span::before{content:"· ";color:#4a4c50}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="top">
+    <div>
+      <h1>JEV Inbox Router · UI 改版对照</h1>
+      <p class="meta">静态还原 Obsidian 默认主题变量后的界面差异（非实机截图）。左：当前实现；右：建议方案。</p>
+    </div>
+    <div class="seg" role="group" aria-label="主题">
+      <button id="t-dark" aria-pressed="true">暗色主题</button>
+      <button id="t-light" aria-pressed="false">亮色主题</button>
+    </div>
+  </div>
+
+  <p class="disclaimer">
+    本页用 CSS 变量近似还原 Obsidian 默认暗色/亮色主题，用于对比设计差异，<b>不是 Obsidian 实机截图</b>。
+    界面内的分类色取自插件的默认配置（A #4C8DFF / B #FF8A3D / C #9B8CFF / D #FFC53D / E #3DC9B0 / F #FF5C5C），
+    并已按主题折算为可读版本。切换右上角主题即可看到同一界面在两种主题下的表现差异。
+  </p>
+
+  <div class="stage theme-dark" id="stage">
+
+    <!-- ============ 01 状态栏 ============ -->
+    <section class="demo">
+      <div class="demo-head"><h2>01 · 状态栏</h2><p class="why">常驻前缀 + 分类色圆点</p></div>
+      <p class="finding">
+        <span class="pill p1">P1</span><b>「JEV ·」前缀在每个状态里重复</b>，而分类色圆点在亮色主题下只有 1.6:1（D 待办）～3.0:1，
+        等于把唯一的识别信号交给了对比度最低的元素。另外这是 <span class="mono">span + click</span>，没有键盘焦点。
+      </p>
+      <div class="pair">
+        <div class="cell"><div class="tag">现状</div><div class="box">
+          <div class="statusbar">
+            <span class="faux">obsidian-git</span>
+            <span class="sb-old"><span class="old-dot" style="background:#FFC53D"></span><span>JEV · 待办 48%</span></span>
+          </div>
+          <div class="rowhint"><span>分类色作为识别点，亮色下近乎不可见</span><span>无 focus 样式</span></div>
+        </div></div>
+        <div class="cell"><div class="tag ok">建议</div><div class="box">
+          <div class="statusbar">
+            <span class="faux">obsidian-git</span>
+            <span class="sb-new" style="--jev-cat:#FFC53D" tabindex="0" role="button">
+              <span class="dot breathe" style="background:color-mix(in srgb,var(--jev-cat) var(--mix-w),var(--mix-base))"></span>
+              <span class="txt">待办 48%</span>
+              <span class="hint">查看判断详情</span>
+            </span>
+          </div>
+          <div class="statusbar" style="margin-top:10px">
+            <span class="faux">obsidian-git</span>
+            <span class="sb-new idle" tabindex="0" role="button"><span class="txt">JEV</span></span>
+          </div>
+          <div class="rowhint"><span>去掉常驻前缀，就绪态只留插件名</span><span>hover 才出现「查看判断详情」</span><span>可 Tab 聚焦</span></div>
+        </div></div>
+      </div>
+    </section>
+
+    <!-- ============ 02 判断弹窗 ============ -->
+    <section class="demo">
+      <div class="demo-head"><h2>02 · 判断弹窗</h2><p class="why">层级、信息密度、主次动作</p></div>
+      <p class="finding">
+        <span class="pill p0">P0</span><b>分类色被当作正文文字色</b>：<span class="mono">modals.ts:89</span> 把每个分类的 <span class="mono">r.color</span>
+        直接设成概率行左侧字母的 <span class="mono">color</span>。11px 文本需要 4.5:1，而亮色主题下六个默认色全部不达标（1.58:1 ～ 3.20:1）。<br>
+        <span class="pill p1">P1</span><b>三个区域共用同一种底色</b>（结论条、6 个元信息卡、进度条轨道都落在 secondary 层），没有一个区域是主角；
+        元信息被摊成 6 个等权卡片，真正的结论「去哪」反而被稀释。<br>
+        <span class="pill p1">P1</span><b>4 个同级按钮平铺</b>，「重新判断」和「移除判断块」与主操作抢注意力，且按钮文案没有点名对象。
+      </p>
+      <div class="pair">
+        <div class="cell"><div class="tag">现状</div><div class="box">
+          <div class="surface old-modal">
+            <h2>JEV 分流判断</h2>
+            <div class="old-verdict">
+              <span class="old-dot" style="background:#FFC53D"></span>
+              <span>D 待办事项</span><span class="old-arrow">→</span>
+              <span class="old-pill">要做的事</span>
+            </div>
+            <div class="old-grid">
+              <div class="old-cell"><div class="l">置信度</div><div class="v">48%（门槛 40%）</div></div>
+              <div class="old-cell"><div class="l">领先优势</div><div class="v">2.29×（门槛 1.4×）</div></div>
+              <div class="old-cell"><div class="l">长期价值</div><div class="v">3/4 — 中等</div></div>
+              <div class="old-cell"><div class="l">判断模型</div><div class="v">jev-latest</div></div>
+              <div class="old-cell"><div class="l">判断时间</div><div class="v">2026-09-21 18:42:07</div></div>
+              <div class="old-cell"><div class="l">本次消耗</div><div class="v">1 240 input tokens</div></div>
+            </div>
+            <h3 class="old-h3">概率分布</h3>
+            <div class="old-chart">
+              <div class="old-row chosen"><div class="k" style="color:#FFC53D">D</div><div class="lb">待办事项</div><div class="old-track"><div class="old-fill" style="width:48%;background:#FFC53D"></div></div><div class="p">48%</div></div>
+              <div class="old-row"><div class="k" style="color:#4C8DFF">A</div><div class="lb">永久知识</div><div class="old-track"><div class="old-fill" style="width:21%;background:#4C8DFF"></div></div><div class="p">21%</div></div>
+              <div class="old-row"><div class="k" style="color:#FF8A3D">B</div><div class="lb">产品灵感</div><div class="old-track"><div class="old-fill" style="width:11%;background:#FF8A3D"></div></div><div class="p">11%</div></div>
+              <div class="old-row"><div class="k" style="color:#9B8CFF">C</div><div class="lb">待研究</div><div class="old-track"><div class="old-fill" style="width:9%;background:#9B8CFF"></div></div><div class="p">9%</div></div>
+              <div class="old-row"><div class="k" style="color:#3DC9B0">E</div><div class="lb">引用资料</div><div class="old-track"><div class="old-fill" style="width:7%;background:#3DC9B0"></div></div><div class="p">7%</div></div>
+              <div class="old-row"><div class="k" style="color:#FF5C5C">F</div><div class="lb">应该删除</div><div class="old-track"><div class="old-fill" style="width:4%;background:#FF5C5C"></div></div><div class="p">4%</div></div>
+            </div>
+            <div class="old-actions">
+              <button class="btn cta">移动到目标文件夹</button>
+              <button class="btn">换个去向…</button>
+              <button class="btn">重新判断</button>
+              <button class="btn">移除判断块</button>
+            </div>
+          </div>
+          <div class="rowhint"><span>切到亮色主题：D/E/B/C 的字母与进度条基本消失</span><span>6 种饱和色同时出现</span></div>
+        </div></div>
+        <div class="cell"><div class="tag ok">建议</div><div class="box">
+          <div class="surface new" style="--jev-cat:#FFC53D">
+            <div class="title">JEV 分流判断</div>
+            <div class="verdict">
+              <span class="dot lg" style="background:color-mix(in srgb,var(--jev-cat) var(--mix-w),var(--mix-base))"></span>
+              <span class="cat">待办事项</span>
+              <span class="to">→ <span class="path">要做的事</span></span>
+              <span class="mark">未移动</span>
+            </div>
+            <div class="metaline">
+              <span class="kv"><span class="k">置信度</span><span class="v">48%</span></span>
+              <span class="kv"><span class="k">门槛</span><span class="v">40%</span></span>
+              <span class="kv"><span class="k">领先优势</span><span class="v">2.29×</span></span>
+              <span class="kv"><span class="k">要求</span><span class="v">1.4×</span></span>
+              <span class="kv"><span class="k">长期价值</span><span class="v">3/4 中等</span></span>
+            </div>
+            <div class="chart">
+              <div class="prow chosen"><div class="k">D</div><div class="lb">待办事项</div><div class="track"><div class="fill" style="width:48%"></div></div><div class="p">48%</div></div>
+              <div class="prow"><div class="k">A</div><div class="lb">永久知识</div><div class="track"><div class="fill" style="width:21%"></div></div><div class="p">21%</div></div>
+              <div class="prow"><div class="k">B</div><div class="lb">产品灵感</div><div class="track"><div class="fill" style="width:11%"></div></div><div class="p">11%</div></div>
+              <div class="prow"><div class="k">C</div><div class="lb">待研究</div><div class="track"><div class="fill" style="width:9%"></div></div><div class="p">9%</div></div>
+              <div class="prow"><div class="k">E</div><div class="lb">引用资料</div><div class="track"><div class="fill" style="width:7%"></div></div><div class="p">7%</div></div>
+              <div class="prow"><div class="k">F</div><div class="lb">应该删除</div><div class="track"><div class="fill" style="width:4%"></div></div><div class="p">4%</div></div>
+            </div>
+            <div class="foot">jev-latest · 2026-09-21 18:42 · 1 240 input tokens</div>
+            <div class="actions">
+              <button class="btn cta">移动到 要做的事</button>
+              <button class="btn">换个去向…</button>
+              <button class="btn icon push" aria-label="更多操作" title="更多操作">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="rowhint"><span>只有被选中的那条上色</span><span>元信息压成一行键值 + 一行弱化尾注</span><span>主操作点名文件夹</span><span>3 个次级动作收进 ⋯</span></div>
+        </div></div>
+      </div>
+    </section>
+
+    <!-- ============ 03 文件夹选择器 ============ -->
+    <section class="demo">
+      <div class="demo-head"><h2>03 · 文件夹选择器</h2><p class="why">控件与触摸目标</p></div>
+      <p class="finding">
+        <span class="pill p0">P0</span><b>行高 38px、且是 <span class="mono">div + onClick</span></b>：没有 <span class="mono">role</span>／<span class="mono">tabindex</span>，
+        键盘到不了，触摸目标低于 44px（<span class="mono">manifest.json</span> 声明 <span class="mono">isDesktopOnly: false</span>，移动端在范围内）。<br>
+        <span class="pill p1">P1</span>搜索框是裸 <span class="mono">createEl("input")</span>，没有 Obsidian 的 <span class="mono">.text-input</span>，
+        高度、圆角、聚焦环都和设置页里的输入框不一致；<span class="mono">窗口 50ms 后 focus()</span> 也是绕开 Modal 生命周期的写法。<br>
+        <span class="pill p2">P2</span>文件夹路径用 <span class="mono">--text-faint</span>（暗色主题实测 2.90:1）承载「去哪」这个关键信息。
+      </p>
+      <div class="pair">
+        <div class="cell"><div class="tag">现状</div><div class="box">
+          <div class="surface old-modal">
+            <h2 style="font-size:1.2em">选择目标文件夹</h2>
+            <input class="old-input" value="" placeholder="输入关键字过滤…">
+            <div class="old-list">
+              <div class="old-item"><span>大学</span><span class="sub">大学</span></div>
+              <div class="old-item"><span>腾讯-产品</span><span class="sub">腾讯-产品</span></div>
+              <div class="old-item"><span>要做的事</span><span class="sub">要做的事</span></div>
+              <div class="old-item"><span>_附件-归档-模板/归档</span><span class="sub">_附件-归档-模板/归档</span></div>
+            </div>
+          </div>
+          <div class="rowhint"><span>行高 38px</span><span>div 冒充按钮，键盘不可达</span><span>路径用 --text-faint</span></div>
+        </div></div>
+        <div class="cell"><div class="tag ok">建议</div><div class="box">
+          <div class="surface new">
+            <div class="title">选择目标文件夹</div>
+            <div class="search">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+              <input value="" placeholder="输入关键字过滤…">
+            </div>
+            <div class="rows">
+              <div class="row" tabindex="0" role="button"><span class="path">大学</span><span class="mark"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span></div>
+              <div class="row" tabindex="0" role="button"><span class="path">腾讯-产品</span></div>
+              <div class="row" tabindex="0" role="button"><span class="path">要做的事</span></div>
+              <div class="row" tabindex="0" role="button"><span class="path">_附件-归档-模板/归档</span></div>
+            </div>
+          </div>
+          <div class="rowhint"><span>行高 44px</span><span>role/tabindex + focus-visible</span><span>当前值带勾</span><span>路径改 --text-muted</span></div>
+        </div></div>
+      </div>
+    </section>
+
+    <!-- ============ 04 设置页分类卡 ============ -->
+    <section class="demo">
+      <div class="demo-head"><h2>04 · 设置页 · 分类卡</h2><p class="why">可发现的展开方式与真实控件</p></div>
+      <p class="finding">
+        <span class="pill p1">P1</span><b>启用开关是裸 checkbox</b>（<span class="mono">settings-tab.ts:234</span>），旁边的「启用」是 <span class="mono">span</span> 不是
+        <span class="mono">label</span>：点文字没反应，读屏也不知道它属于谁；外观也和设置页其它开关不同。<br>
+        <span class="pill p1">P1</span><b>展开靠双击</b>（<span class="mono">:254</span>），没有任何视觉线索；关闭态还叠了 <span class="mono">opacity:.5</span>，
+        把整卡对比度砍半，禁用与「不重要」被混为一谈。<br>
+        <span class="pill p1">P1</span>「恢复默认分类」会整体覆盖分类与文件夹，<b>没有二次确认也没有撤销</b>；三个同类按钮并排且名称难以区分。
+      </p>
+      <div class="pair">
+        <div class="cell"><div class="tag">现状</div><div class="box">
+          <div class="old-card dis">
+            <div class="old-head">
+              <span class="old-dot" style="background:#FFC53D"></span>
+              <span class="old-key">D</span>
+              <input class="old-label" value="待办事项">
+              <span class="old-preview">→ 要做的事</span>
+              <span class="old-spacer"></span>
+              <input type="checkbox" checked>
+              <span class="old-tgl">启用</span>
+              <button class="btn">收起</button>
+            </div>
+            <div class="old-body">
+              <div class="old-si"><div><div class="n">目标文件夹</div><div class="d">这条笔记最终被送到哪里。</div></div>
+                <select class="old-sel"><option>要做的事</option></select></div>
+              <div class="old-si"><div><div class="n">判据描述</div><div class="d">告诉 JEV 什么内容算这一类。写得越具体越准。</div></div>
+                <select class="old-sel"><option>（多行文本域）</option></select></div>
+            </div>
+          </div>
+          <div class="rowhint"><span>禁用态整体 opacity .5</span><span>「收起」是文字按钮</span><span>开关与文字无关联</span></div>
+        </div></div>
+        <div class="cell"><div class="tag ok">建议</div><div class="box">
+          <div class="new" style="--jev-cat:#FFC53D">
+            <div class="catcard">
+              <button class="cathead" aria-expanded="true">
+                <span class="chev open"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></span>
+                <span class="dot" style="background:color-mix(in srgb,var(--jev-cat) var(--mix-w),var(--mix-base))"></span>
+                <span class="key">D</span>
+                <span class="labelname">待办事项</span>
+                <span class="to">→ 要做的事</span>
+              </button>
+              <div class="catbody">
+                <div class="si">
+                  <div><div class="n">目标文件夹</div><div class="d">这条笔记最终被送到哪里。</div></div>
+                  <select class="field" style="height:32px"><option>要做的事</option></select>
+                </div>
+                <div class="si stack">
+                  <div style="grid-column:1 / -1"><div class="n">判据描述</div><div class="d">告诉 JEV 什么内容算这一类。写得越具体越准。</div></div>
+                  <textarea class="field" style="grid-column:1 / -1" rows="3">需要执行的具体行动：任务、约定、日程、要交付的东西、要回复的人。有动作，有对象。</textarea>
+                </div>
+              </div>
+            </div>
+            <div class="catcard dis" style="margin-top:8px">
+              <button class="cathead" aria-expanded="false">
+                <span class="chev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></span>
+                <span class="dot" style="background:var(--text-faint)"></span>
+                <span class="key">F</span>
+                <span class="labelname">应该删除</span>
+                <span class="to">→ _附件-归档-模板/归档</span>
+              </button>
+            </div>
+          </div>
+          <div class="rowhint"><span>整行可点 + chevron 旋转 + aria-expanded</span><span>开关是真实控件</span><span>禁用只用文字降级，不砍对比度</span><span>设置项之间用发丝线分隔</span></div>
+        </div></div>
+      </div>
+    </section>
+
+  </div>
+
+  <p class="disclaimer" style="border-left-color:#4a4c50">
+    提示：本页 CSS 里的 <span class="mono">.new / .chart / .row / .cathead</span> 等规则即为建议落地的样式草案，
+    可直接对照改写 <span class="mono">styles.css</span>。分类色的主题折算统一用
+    <span class="mono">color-mix(in srgb, var(--jev-cat) 55%|85%, var(--text-normal))</span>，
+    亮色取 55%、暗色取 85%。
+  </p>
+</div>
+
+<script>
+(function(){
+  var stage=document.getElementById("stage");
+  var bd=document.getElementById("t-dark"), bl=document.getElementById("t-light");
+  function set(t){
+    stage.classList.toggle("theme-dark",t==="dark");
+    stage.classList.toggle("theme-light",t==="light");
+    bd.setAttribute("aria-pressed",String(t==="dark"));
+    bl.setAttribute("aria-pressed",String(t==="light"));
+  }
+  bd.addEventListener("click",function(){set("dark")});
+  bl.addEventListener("click",function(){set("light")});
+})();
+</script>
+</body>
+</html>

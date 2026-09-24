@@ -1,8 +1,18 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Menu, Notice, PluginSettingTab, Setting, setIcon } from "obsidian";
 import { DEFAULT_CATEGORIES, DEFAULT_SETTINGS, JEV_ENDPOINT, MAX_CATEGORIES } from "./constants";
 import { JevError } from "./jev-client";
+import { ConfirmModal } from "./modals";
+import { ORGANIZATION_PRESETS, presetById, remapPresetKeys } from "./presets";
 import type { CategoryConfig, JevSettings } from "./types";
+import type { PresetDefinition } from "./presets";
 import type JevInboxRouterPlugin from "./main";
+
+/** 节末 ⋯ 菜单里的一项 */
+interface OverflowItem {
+	title: string;
+	icon: string;
+	onClick: () => void | Promise<void>;
+}
 
 /** 给下拉框补上「库里已有文件夹 + 当前值」 */
 function folderOptions(current: string, folders: string[]): Record<string, string> {
@@ -16,6 +26,12 @@ export class JevSettingTab extends PluginSettingTab {
 	private draft: JevSettings;
 	private folders: string[] = [];
 	private expanded = new Set<string>();
+	/** 组织方式：当前点选的预设（只是高亮，不生效；应用由「应用」按钮统一触发） */
+	private selectedPresetId: string | null = null;
+	/** 组织方式：应用方式（替换 / 追加），会话内记忆 */
+	private applyMode: "replace" | "append" = "replace";
+	/** 组织方式：应用时是否预建预设的文件夹 */
+	private applyCreateFolders = true;
 
 	constructor(app: App, private readonly plugin: JevInboxRouterPlugin) {
 		super(app, plugin);
@@ -37,6 +53,7 @@ export class JevSettingTab extends PluginSettingTab {
 		});
 
 		this.renderApiSection(containerEl);
+		this.renderOrganizationSection(containerEl);
 		this.renderCategorySection(containerEl);
 		this.renderAutoSection(containerEl);
 		this.renderBlockSection(containerEl);
@@ -46,6 +63,28 @@ export class JevSettingTab extends PluginSettingTab {
 
 	private async commit(): Promise<void> {
 		await this.plugin.saveSettings(this.draft);
+	}
+
+	/** 把一个 ⋯ 图标按钮挂到设置项右侧，用来收纳同类动作 */
+	private addOverflowButton(setting: Setting, items: OverflowItem[]): void {
+		setting.addExtraButton((b) => {
+			b.setIcon("more-horizontal").setTooltip("更多操作");
+			b.extraSettingsEl.addClass("jev-more-btn");
+			b.extraSettingsEl.setAttribute("aria-label", "更多操作");
+			b.onClick(() => {
+				const menu = new Menu();
+				for (const it of items) {
+					menu.addItem((item) =>
+						item
+							.setTitle(it.title)
+							.setIcon(it.icon)
+							.onClick(() => void it.onClick())
+					);
+				}
+				const rect = b.extraSettingsEl.getBoundingClientRect();
+				menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 });
+			});
+		});
 	}
 
 	// ------------------------------------------------------------- JEV 接口
@@ -59,7 +98,7 @@ export class JevSettingTab extends PluginSettingTab {
 			)
 			.addText((t) => {
 				t.inputEl.type = "password";
-				t.inputEl.addClass("jev-wide-input");
+				t.inputEl.addClass("text-input", "jev-wide-input");
 				t.setPlaceholder("apikey_… 或 sk-…")
 					.setValue(this.draft.apiKey)
 					.onChange(async (v) => {
@@ -71,28 +110,28 @@ export class JevSettingTab extends PluginSettingTab {
 		new Setting(root)
 			.setName("端点地址")
 			.setDesc(`默认 ${JEV_ENDPOINT}。只有走自建代理时才需要改。`)
-			.addText((t) =>
-				t
-					.setPlaceholder(JEV_ENDPOINT)
+			.addText((t) => {
+				t.inputEl.addClass("text-input");
+				t.setPlaceholder(JEV_ENDPOINT)
 					.setValue(this.draft.apiUrl)
 					.onChange(async (v) => {
 						this.draft.apiUrl = v.trim() || JEV_ENDPOINT;
 						await this.commit();
-					})
-			);
+					});
+			});
 
 		new Setting(root)
 			.setName("模型")
 			.setDesc("jev-latest 会跟随最新版本；也可以写死版本号，例如 jev-1.13.0。")
-			.addText((t) =>
-				t
-					.setPlaceholder("jev-latest")
+			.addText((t) => {
+				t.inputEl.addClass("text-input");
+				t.setPlaceholder("jev-latest")
 					.setValue(this.draft.model)
 					.onChange(async (v) => {
 						this.draft.model = v.trim() || "jev-latest";
 						await this.commit();
-					})
-			);
+					});
+			});
 
 		new Setting(root)
 			.setName("测试连接")
@@ -133,13 +172,198 @@ export class JevSettingTab extends PluginSettingTab {
 			);
 	}
 
+	// ------------------------------------------------------------- 组织方式
+	private renderOrganizationSection(root: HTMLElement): void {
+		root.createEl("h3", { text: "组织方式" });
+		root.createEl("p", {
+			cls: "jev-hint",
+			text:
+				"内置几套主流知识管理理论的分类方案，也可以之后在「分类与去向」里逐条改成自己的目录习惯。点选一套预设，再点下面的「应用」才会生效。",
+		});
+
+		// ---- 预设选择：真按钮行，点选只高亮，不立即生效 ----
+		const list = root.createDiv({ cls: "jev-preset-list" });
+		for (const preset of ORGANIZATION_PRESETS) {
+			const selected = this.selectedPresetId === preset.id;
+			const row = list.createEl("button", {
+				cls: "jev-row jev-preset-row",
+				attr: { type: "button" },
+			});
+			row.setAttribute("aria-pressed", String(selected));
+			if (selected) row.addClass("is-selected");
+
+			// 左侧圆点用该预设第一个分类的色，走 --jev-cat 按主题折算
+			const dot = row.createSpan({ cls: "jev-dot jev-ink" });
+			dot.style.setProperty("--jev-cat", preset.categories[0]?.color ?? "#7F8C99");
+
+			const main = row.createSpan({ cls: "jev-preset-main" });
+			main.createSpan({ cls: "jev-preset-name", text: preset.name });
+			main.createSpan({ cls: "jev-preset-desc", text: preset.description });
+
+			const meta = row.createSpan({
+				cls: "jev-preset-meta",
+				text: `${preset.categories.length} 个分类 · → ${preset.inboxFolder}`,
+			});
+			meta.setAttribute(
+				"title",
+				preset.categories
+					.map((c) => `${c.key} ${c.label} → ${c.folder || "库根目录"}`)
+					.join("\n")
+			);
+
+			row.addEventListener("click", () => {
+				this.selectedPresetId = preset.id;
+				this.display();
+			});
+		}
+
+		// ---- 应用方式 ----
+		new Setting(root)
+			.setName("应用方式")
+			.setDesc(
+				"替换会用预设覆盖现有分类（应用前自动存快照，可一键还原）；追加则保留现有分类，把预设排在后面。"
+			)
+			.addDropdown((d) =>
+				d
+					.addOptions({ replace: "替换现有分类（推荐）", append: "追加为新分类" })
+					.setValue(this.applyMode)
+					.onChange((v) => {
+						this.applyMode = v === "append" ? "append" : "replace";
+					})
+			)
+			.addToggle((t) => {
+				t.setValue(this.applyCreateFolders).onChange((v) => {
+					this.applyCreateFolders = v;
+				});
+				t.toggleEl.setAttribute("aria-label", "同时创建预设的文件夹");
+				t.toggleEl.setAttribute("title", "同时创建预设的文件夹");
+				return t;
+			});
+
+		// ---- 应用（本节唯一 CTA）+ 还原 ----
+		const preset = this.selectedPresetId ? presetById(this.selectedPresetId) : undefined;
+		const bar = new Setting(root)
+			.setName(preset ? `将应用：${preset.name}` : "应用预设")
+			.setDesc(preset ? "应用前会弹窗确认，写清楚会改动什么。" : "先在上面点选一套预设。")
+			.addButton((b) =>
+				b
+					.setButtonText("应用选中的预设")
+					.setCta()
+					.setDisabled(!preset)
+					.onClick(() => {
+						if (preset) this.confirmApplyPreset(preset);
+					})
+			);
+
+		if (this.draft.previousCategories && this.draft.previousCategories.length > 0) {
+			bar.addButton((b) =>
+				b.setButtonText("还原上一次组织方式").onClick(() => this.confirmRestorePrevious())
+			);
+		}
+	}
+
+	/** 应用预设前，把文件夹清单写进确认文案（含 index 目录，去重） */
+	private presetFolderList(preset: PresetDefinition): string[] {
+		const paths = new Set<string>();
+		if (preset.inboxFolder.trim()) paths.add(preset.inboxFolder);
+		for (const c of preset.categories) {
+			if (c.folder.trim()) paths.add(c.folder);
+		}
+		return [...paths];
+	}
+
+	private confirmApplyPreset(preset: PresetDefinition): void {
+		const replace = this.applyMode === "replace";
+		const existingCount = this.draft.categories.length;
+		const preview = preset.categories
+			.map((c) => `${c.key} ${c.label} → ${c.folder || "库根目录"}`)
+			.join("；");
+
+		const lines: string[] = replace
+			? [
+					`将把 ${preset.categories.length} 个分类替换为「${preset.name}」预设（${preview}）。`,
+					`你现有的 ${existingCount} 个分类会先存为快照，可在下方一键还原。`,
+				]
+			: [
+					`将把「${preset.name}」预设的 ${preset.categories.length} 个分类追加到现有 ${existingCount} 个分类之后（共 ${existingCount + preset.categories.length} 个，超过上限会中止）。`,
+				];
+		if (this.applyCreateFolders) {
+			lines.push(`并创建缺失的文件夹：${this.presetFolderList(preset).join("、")}。`);
+		}
+		lines.push(`index 目录会设为 ${preset.inboxFolder}。`);
+
+		new ConfirmModal(this.app, {
+			title: replace ? `应用「${preset.name}」预设（替换）` : `应用「${preset.name}」预设（追加）`,
+			body: lines.join(""),
+			confirmText: replace ? "替换分类" : "追加分类",
+			onConfirm: async () => {
+				if (replace) {
+					// 快照先行：存完再整体替换
+					this.draft.previousCategories = JSON.parse(JSON.stringify(this.draft.categories));
+					this.draft.categories = preset.categories.map((c) => JSON.parse(JSON.stringify(c)));
+				} else {
+					const total = this.draft.categories.length + preset.categories.length;
+					if (total > MAX_CATEGORIES) {
+						new Notice(
+							`追加后共 ${total} 个分类，超过上限 ${MAX_CATEGORIES}，已中止，未改动任何数据。`
+						);
+						return;
+					}
+					const taken = new Set(this.draft.categories.map((c) => c.key));
+					this.draft.categories = [
+						...this.draft.categories,
+						...remapPresetKeys(preset.categories, taken),
+					];
+				}
+				if (this.applyCreateFolders) await this.createPresetFolders(preset);
+				// index 目录与多收件箱保持同步
+				this.draft.indexFolder = preset.inboxFolder;
+				this.draft.inboxFolders = [preset.inboxFolder];
+				await this.commit();
+				this.selectedPresetId = null;
+				this.display();
+				new Notice(`已${replace ? "替换" : "追加"}为「${preset.name}」预设。`);
+			},
+		}).open();
+	}
+
+	/** 预建预设的文件夹：已存在则跳过；单个失败只提示，不中断整体应用 */
+	private async createPresetFolders(preset: PresetDefinition): Promise<void> {
+		for (const path of this.presetFolderList(preset)) {
+			try {
+				await this.plugin.router.ensureFolder(path);
+			} catch (error) {
+				new Notice(
+					`创建文件夹 ${path} 失败：${error instanceof Error ? error.message : String(error)}`
+				);
+			}
+		}
+	}
+
+	private confirmRestorePrevious(): void {
+		const snapshot = this.draft.previousCategories;
+		if (!snapshot || snapshot.length === 0) return;
+		new ConfirmModal(this.app, {
+			title: "还原上一次组织方式",
+			body: `将把分类恢复为应用预设前的 ${snapshot.length} 个分类（名称、判据、去向与配色都会还原），当前的 ${this.draft.categories.length} 个分类会被替换。此操作不可撤销。`,
+			confirmText: "还原分类",
+			onConfirm: async () => {
+				this.draft.categories = JSON.parse(JSON.stringify(snapshot));
+				this.draft.previousCategories = null;
+				await this.commit();
+				this.display();
+				new Notice("已还原上一次组织方式。");
+			},
+		}).open();
+	}
+
 	// --------------------------------------------------------- 分类与去向
 	private renderCategorySection(root: HTMLElement): void {
 		root.createEl("h3", { text: "分类与去向" });
 		root.createEl("p", {
 			cls: "jev-hint",
 			text:
-				"每一行是一个分类。判据描述是喂给 JEV 的说明，写得越具体，判断越准。去向决定这条笔记被送到哪个文件夹。",
+				"每一行是一个分类。判据描述是喂给 JEV 的说明，写得越具体，判断越准。去向决定这条笔记被送到哪个文件夹。想换个整体的组织方式，去上面的「组织方式」选预设；单个分类随时可以改。",
 		});
 
 		const wrap = root.createDiv({ cls: "jev-cat-list" });
@@ -172,50 +396,95 @@ export class JevSettingTab extends PluginSettingTab {
 				this.display();
 			})
 		);
-		bar.addButton((b) =>
-			b.setButtonText("恢复默认分类").onClick(async () => {
+		this.addOverflowButton(bar, [
+			{
+				title: "重置为默认分类（含文件夹）",
+				icon: "rotate-ccw",
+				onClick: () => this.confirmResetCategories(),
+			},
+			{
+				title: "只重置名称与描述",
+				icon: "type",
+				onClick: () => this.confirmResetNames(),
+			},
+		]);
+	}
+
+	private confirmResetCategories(): void {
+		new ConfirmModal(this.app, {
+			title: "重置为默认分类",
+			body:
+				"所有分类的名称、短名、判据描述、目标文件夹与配色都会恢复成初始的 6 个分类；你新增或改过的分类会被移除。此操作不可撤销。",
+			confirmText: "重置分类",
+			onConfirm: async () => {
 				this.draft.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
 				this.expanded.clear();
 				await this.commit();
 				this.display();
-			})
-		);
-		bar.addButton((b) =>
-			b
-				.setButtonText("恢复默认分类名称与描述")
-				.setTooltip("只重置文字说明，保留你已选好的文件夹")
-				.onClick(async () => {
-					for (const def of DEFAULT_CATEGORIES) {
-						const mine = this.draft.categories.find((c) => c.key === def.key);
-						if (mine) {
-							mine.label = def.label;
-							mine.short = def.short;
-							mine.description = def.description;
-						}
+				new Notice("已重置为默认分类。");
+			},
+		}).open();
+	}
+
+	private confirmResetNames(): void {
+		new ConfirmModal(this.app, {
+			title: "只重置名称与描述",
+			body:
+				"只会把每个分类的名称、短名和判据描述恢复成初始文案。你已选好的目标文件夹、标签、顺序与配色都会保留。",
+			confirmText: "重置名称与描述",
+			onConfirm: async () => {
+				for (const def of DEFAULT_CATEGORIES) {
+					const mine = this.draft.categories.find((c) => c.key === def.key);
+					if (mine) {
+						mine.label = def.label;
+						mine.short = def.short;
+						mine.description = def.description;
 					}
-					await this.commit();
-					this.display();
-				})
-		);
+				}
+				await this.commit();
+				this.display();
+				new Notice("已重置分类名称与描述。");
+			},
+		}).open();
 	}
 
 	private renderCategoryCard(wrap: HTMLElement, cat: CategoryConfig, index: number): void {
 		const card = wrap.createDiv({ cls: "jev-cat-card" });
 		if (!cat.enabled) card.addClass("is-disabled");
 		const isOpen = this.expanded.has(cat.key);
+		const bodyId = `jev-cat-body-${cat.key}`;
 
 		// ---- 头部 ----
+		// 注意：头部不能做成整行 <button>（行内含输入控件与开关，嵌套控件是无效 HTML），
+		// 因此用一个独立的 chevron 按钮承担展开 / 折叠。
 		const head = card.createDiv({ cls: "jev-cat-head" });
 
-		const dot = head.createSpan({ cls: "jev-dot" });
-		dot.style.background = cat.color;
+		const chev = head.createEl("button", { cls: "jev-chev-btn", attr: { type: "button" } });
+		if (isOpen) chev.addClass("is-open");
+		chev.setAttribute("aria-expanded", String(isOpen));
+		if (isOpen) chev.setAttribute("aria-controls", bodyId);
+		chev.setAttribute("aria-label", `${isOpen ? "收起" : "展开"} ${cat.key} ${cat.label}`);
+		setIcon(chev, "chevron-right");
+		chev.addEventListener("click", () => {
+			if (this.expanded.has(cat.key)) this.expanded.delete(cat.key);
+			else this.expanded.add(cat.key);
+			this.display();
+		});
+
+		const dot = head.createSpan({ cls: "jev-dot jev-ink" });
+		dot.style.setProperty("--jev-cat", cat.color);
 
 		const keyEl = head.createSpan({ cls: "jev-cat-key", text: cat.key });
 		keyEl.setAttribute("title", "分类标识，作为 JEV 的选项 key；改动后需要重新判断已有的笔记");
 
 		const labelInput = head.createEl("input", {
-			cls: "jev-cat-label-input",
-			attr: { type: "text", value: cat.label, placeholder: "分类名" },
+			cls: "text-input jev-cat-label-input",
+			attr: {
+				type: "text",
+				value: cat.label,
+				placeholder: "分类名",
+				"aria-label": `分类 ${cat.key} 的名称`,
+			},
 		});
 		labelInput.addEventListener("change", async () => {
 			cat.label = labelInput.value.trim() || cat.label;
@@ -224,42 +493,34 @@ export class JevSettingTab extends PluginSettingTab {
 			this.display();
 		});
 
-		head.createSpan({
+		const preview = head.createSpan({
 			cls: "jev-cat-folder-preview",
 			text: cat.folder ? `→ ${cat.folder}` : "→ 库根目录",
 		});
+		preview.setAttribute("title", cat.folder || "库根目录");
 
-		const spacer = head.createDiv({ cls: "jev-spacer" });
+		head.createDiv({ cls: "jev-spacer" });
 
-		const toggle = head.createEl("input", { attr: { type: "checkbox" } });
+		// 启用开关：Obsidian 原生外观，键盘可达
+		const toggleWrap = head.createDiv({ cls: "checkbox-container" });
+		const toggleId = `jev-cat-toggle-${cat.key}`;
+		const toggle = toggleWrap.createEl("input", {
+			attr: { type: "checkbox", id: toggleId, "aria-label": `启用 ${cat.key} ${cat.label}` },
+		});
 		toggle.checked = cat.enabled;
 		toggle.addEventListener("change", async () => {
 			cat.enabled = toggle.checked;
-			await this.commit();
+			// 只切换禁用类，避免重渲染导致焦点丢失；颜色由 CSS 接管
 			card.toggleClass("is-disabled", !cat.enabled);
+			await this.commit();
 		});
-		head.createSpan({ cls: "jev-toggle-label", text: "启用" });
+		head.createEl("label", { cls: "jev-toggle-label", text: "启用", attr: { for: toggleId } });
 
-		const more = head.createEl("button", {
-			cls: "jev-icon-btn",
-			text: isOpen ? "收起" : "展开",
-		});
-		more.addEventListener("click", () => {
-			if (this.expanded.has(cat.key)) this.expanded.delete(cat.key);
-			else this.expanded.add(cat.key);
-			this.display();
-		});
-
-		if (!isOpen) {
-			head.addEventListener("dblclick", () => {
-				this.expanded.add(cat.key);
-				this.display();
-			});
-			return;
-		}
+		if (!isOpen) return;
 
 		// ---- 展开区 ----
 		const body = card.createDiv({ cls: "jev-cat-body" });
+		body.setAttribute("id", bodyId);
 
 		new Setting(body)
 			.setName("目标文件夹")
@@ -279,7 +540,7 @@ export class JevSettingTab extends PluginSettingTab {
 			.setDesc("告诉 JEV 什么内容算这一类。写得越具体越准。")
 			.addTextArea((t) => {
 				t.inputEl.rows = 3;
-				t.inputEl.addClass("jev-wide-input");
+				t.inputEl.addClass("text-input", "jev-wide-input");
 				t.setValue(cat.description).onChange(async (v) => {
 					cat.description = v;
 					await this.commit();
@@ -289,23 +550,26 @@ export class JevSettingTab extends PluginSettingTab {
 		new Setting(body)
 			.setName("状态栏短名")
 			.setDesc("状态栏空间有限，用两三个字概括。")
-			.addText((t) =>
+			.addText((t) => {
+				t.inputEl.addClass("text-input");
 				t.setValue(cat.short).onChange(async (v) => {
 					cat.short = v.trim() || cat.label;
 					await this.commit();
-				})
-			);
+				});
+			});
 
 		new Setting(body)
 			.setName("写入标签")
 			.setDesc("分流时写进 frontmatter 的 tags，留空则不写。")
-			.addText((t) =>
+			.addText((t) => {
+				t.inputEl.addClass("text-input");
 				t.setValue(cat.tag).onChange(async (v) => {
 					cat.tag = v.trim();
 					await this.commit();
-				})
-			);
+				});
+			});
 
+		let hexEl: HTMLElement | null = null;
 		new Setting(body)
 			.setName("配色")
 			.setDesc("界面上的小圆点和概率条颜色。")
@@ -314,9 +578,14 @@ export class JevSettingTab extends PluginSettingTab {
 				t.inputEl.addClass("jev-color-input");
 				t.setValue(cat.color).onChange(async (v) => {
 					cat.color = v;
-					dot.style.background = v;
+					dot.style.setProperty("--jev-cat", v);
+					hexEl?.setText(v.toUpperCase());
 					await this.commit();
 				});
+				hexEl = t.inputEl.parentElement?.createSpan({
+					cls: "jev-color-hex",
+					text: cat.color.toUpperCase(),
+				}) ?? null;
 			})
 			.addExtraButton((b) =>
 				b
@@ -364,9 +633,21 @@ export class JevSettingTab extends PluginSettingTab {
 		root.createEl("h3", { text: "自动分流" });
 
 		new Setting(root)
+			.setName("判断后自动移动")
+			.setDesc(
+				"关闭（推荐）= 判断后只在状态栏给建议，由你一键接受；开启 = 判断达标后直接移动文件，无需确认。"
+			)
+			.addToggle((t) =>
+				t.setValue(this.draft.moveOnJudge).onChange(async (v) => {
+					this.draft.moveOnJudge = v;
+					await this.commit();
+				})
+			);
+
+		new Setting(root)
 			.setName("启用自动分流")
 			.setDesc(
-				"开启后，落在收件箱里的笔记在停止编辑若干秒后会被自动判断并搬走。建议先用手动命令试几次再打开。"
+				"开启后，落在 index 目录里的笔记在停止编辑若干秒后会被自动判断。建议先用手动命令试几次再打开。"
 			)
 			.addToggle((t) =>
 				t.setValue(this.draft.autoRouteEnabled).onChange(async (v) => {
@@ -377,11 +658,11 @@ export class JevSettingTab extends PluginSettingTab {
 
 		new Setting(root)
 			.setName("监听范围")
-			.setDesc("收件箱：只处理指定文件夹里的笔记。整个库：新建的笔记都会被判断（范围更大，慎用）。")
+			.setDesc("index 目录：只处理指定文件夹里的笔记。整个库：新建的笔记都会被判断（范围更大，慎用）。")
 			.addDropdown((d) =>
 				d
 					.addOptions({
-						inbox: "只监听收件箱文件夹",
+						inbox: "只监听 index 目录",
 						vault: "监听整个库",
 					})
 					.setValue(this.draft.watchScope)
@@ -394,19 +675,21 @@ export class JevSettingTab extends PluginSettingTab {
 
 		if (this.draft.watchScope === "inbox") {
 			new Setting(root)
-				.setName("收件箱文件夹")
-				.setDesc("一行一个，支持多个。插件会在分流时自动创建不存在的文件夹。")
-				.addTextArea((t) => {
-					t.inputEl.rows = 3;
-					t.inputEl.addClass("jev-wide-input");
-					t.setPlaceholder("Inbox");
-					t.setValue(this.draft.inboxFolders.join("\n")).onChange(async (v) => {
-						this.draft.inboxFolders = v
-							.split("\n")
-							.map((s) => s.trim())
-							.filter(Boolean);
-						await this.commit();
-					});
+				.setName("index 目录（新建笔记的落点）")
+				.setDesc(
+					"JEV 监听这个目录，判断后给出建议去向。建议把 Obsidian 的「新笔记默认位置」也设到这里（设置 → 文件与链接）。"
+				)
+				.addText((t) => {
+					t.inputEl.addClass("text-input");
+					t.setPlaceholder("Inbox")
+						.setValue(this.draft.indexFolder)
+						.onChange(async (v) => {
+							const clean = v.trim();
+							this.draft.indexFolder = clean;
+							// indexFolder 与 inboxFolders 保持同步（多收件箱是高级用法，不再从 UI 暴露）
+							if (clean) this.draft.inboxFolders = [clean];
+							await this.commit();
+						});
 				});
 		}
 
@@ -437,13 +720,14 @@ export class JevSettingTab extends PluginSettingTab {
 		new Setting(root)
 			.setName("最短内容长度")
 			.setDesc("去掉标记符号后不足这么多字符就不判断，避免为空白笔记浪费调用。")
-			.addText((t) =>
+			.addText((t) => {
+				t.inputEl.addClass("text-input");
 				t.setValue(String(this.draft.minChars)).onChange(async (v) => {
 					const n = Number.parseInt(v, 10);
 					this.draft.minChars = Number.isFinite(n) && n >= 0 ? n : 12;
 					await this.commit();
-				})
-			);
+				});
+			});
 
 		new Setting(root)
 			.setName("置信度门槛")
@@ -575,7 +859,7 @@ export class JevSettingTab extends PluginSettingTab {
 
 		new Setting(root)
 			.setName("在状态栏显示判断结果")
-			.setDesc("格式：JEV · 分类短名 置信度。点一下可以打开完整判断信息。")
+			.setDesc("就绪时只显示「JEV」，有结果时显示「分类短名 置信度」。点一下可以打开完整判断信息。")
 			.addToggle((t) =>
 				t.setValue(this.draft.statusBarEnabled).onChange(async (v) => {
 					this.draft.statusBarEnabled = v;
@@ -587,7 +871,8 @@ export class JevSettingTab extends PluginSettingTab {
 		new Setting(root)
 			.setName("结果保留时长")
 			.setDesc("单位秒，到点后收成「就绪」。填 0 表示一直显示。")
-			.addText((t) =>
+			.addText((t) => {
+				t.inputEl.addClass("text-input");
 				t.setValue(String(Math.round(this.draft.statusBarClearMs / 1000))).onChange(
 					async (v) => {
 						const n = Number.parseInt(v, 10);
@@ -595,8 +880,8 @@ export class JevSettingTab extends PluginSettingTab {
 							Number.isFinite(n) && n >= 0 ? n * 1000 : 12000;
 						await this.commit();
 					}
-				)
-			);
+				);
+			});
 	}
 
 	// ---------------------------------------------------------- 缓存与重置
@@ -606,38 +891,49 @@ export class JevSettingTab extends PluginSettingTab {
 		new Setting(root)
 			.setName("判断结果缓存时长")
 			.setDesc("单位分钟。内容没变就直接复用上一次的判断，省调用。")
-			.addText((t) =>
+			.addText((t) => {
+				t.inputEl.addClass("text-input");
 				t.setValue(String(this.draft.cacheMinutes)).onChange(async (v) => {
 					const n = Number.parseInt(v, 10);
 					this.draft.cacheMinutes = Number.isFinite(n) && n >= 0 ? n : 30;
 					await this.commit();
-				})
-			);
+				});
+			});
 
-		new Setting(root)
-			.setName("清空判断缓存")
-			.setDesc(`当前缓存 ${this.plugin.cacheSize()} 条。`)
-			.addButton((b) =>
-				b.setButtonText("清空").onClick(async () => {
-					this.plugin.clearCache();
-					new Notice("缓存已清空。");
-					this.display();
-				})
-			);
+		const bar = new Setting(root)
+			.setName("重置与清空")
+			.setDesc(`当前缓存 ${this.plugin.cacheSize()} 条。以下动作都会先弹窗确认。`);
+		this.addOverflowButton(bar, [
+			{ title: "清空判断缓存", icon: "database", onClick: () => this.confirmClearCache() },
+			{ title: "恢复全部默认设置（含 API Key）", icon: "alert-triangle", onClick: () => this.confirmRestoreAll() },
+		]);
+	}
 
-		new Setting(root)
-			.setName("恢复全部默认设置")
-			.setDesc("包括 API Key 在内的所有设置都会回到初始状态。")
-			.addButton((b) =>
-				b
-					.setButtonText("恢复默认")
-					.setWarning()
-					.onClick(async () => {
-						this.draft = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-						await this.commit();
-						this.display();
-						new Notice("已恢复默认设置。");
-					})
-			);
+	private confirmClearCache(): void {
+		new ConfirmModal(this.app, {
+			title: "清空判断缓存",
+			body: `当前缓存 ${this.plugin.cacheSize()} 条。清空后，所有笔记下次都需要重新调用 JEV 判断，会消耗额外调用。`,
+			confirmText: "清空缓存",
+			onConfirm: () => {
+				this.plugin.clearCache();
+				new Notice("缓存已清空。");
+				this.display();
+			},
+		}).open();
+	}
+
+	private confirmRestoreAll(): void {
+		new ConfirmModal(this.app, {
+			title: "恢复全部默认设置",
+			body:
+				"包括 API Key、分类、门槛与缓存时长在内的全部设置都会回到初始状态，并清空判断缓存。此操作不可撤销。",
+			confirmText: "恢复全部设置",
+			onConfirm: async () => {
+				this.draft = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+				await this.commit();
+				this.display();
+				new Notice("已恢复默认设置。");
+			},
+		}).open();
 	}
 }

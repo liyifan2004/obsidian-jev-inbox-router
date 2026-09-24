@@ -116,5 +116,25 @@ export function normalizeSettings(raw: RawSettings | null | undefined): JevSetti
 		DEFAULT_SETTINGS.blockStyle
 	);
 
+	// ---- 迁移：v0.2 新增字段（向后兼容，缺的按旧语义补齐） ----
+
+	// indexFolder 缺失时取旧的多收件箱配置的第一项，再不行取 "Inbox"
+	merged.indexFolder = text(
+		source.indexFolder,
+		text(inboxFolders[0], DEFAULT_SETTINGS.indexFolder)
+	);
+
+	// moveOnJudge 缺失时沿用旧字段 autoRouteEnabled：
+	// 老用户开了自动分流 = 升级前就会移动文件，不能因为升级悄悄变成只给建议
+	merged.moveOnJudge =
+		typeof source.moveOnJudge === "boolean"
+			? source.moveOnJudge
+			: source.autoRouteEnabled === true;
+
+	// 应用预设前的快照；缺失或类型不对时视为没有快照
+	merged.previousCategories = Array.isArray(source.previousCategories)
+		? source.previousCategories.map((c) => normalizeCategory(c as RawCategory))
+		: null;
+
 	return merged;
 }
