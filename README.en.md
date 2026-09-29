@@ -10,6 +10,8 @@
 
 [简体中文](README.md) | English
 
+> The plugin UI follows Obsidian's interface language (English / 简体中文) as of v0.2.0.
+
 Uses [JEV](https://typesafe.ai) (TypeSafe's System One model) to decide "which category does this note belong to", then routes it to the matching folder.
 
 **It never writes anything for you.** No summaries, no expansion, no rewriting. It answers exactly one question:

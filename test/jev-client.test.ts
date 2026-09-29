@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAX_CONTENT_CHARS } from "../src/constants";
+import { t } from "../src/i18n";
 import { JevClient, JevError, hashContent } from "../src/jev-client";
 import type { JevResponse } from "../src/types";
 import { makeSettings } from "./helpers/fixtures";
@@ -261,7 +262,7 @@ describe("JevClient.classify 错误处理", () => {
 
 		await expect(
 			client.classify(INPUT, oneCategory, { lowValueEnabled: false })
-		).rejects.toThrow(/2 个分类/);
+		).rejects.toThrow(t("errNeedTwoCategories"));
 		expect(captured).toHaveLength(0);
 	});
 
@@ -271,7 +272,7 @@ describe("JevClient.classify 错误处理", () => {
 
 		await expect(
 			client.classify(INPUT, CATEGORIES, { lowValueEnabled: false })
-		).rejects.toThrow(/未知分类/);
+		).rejects.toThrow(t("errUnknownCategory", { key: "Z" }));
 	});
 
 	it("category 不是 choice 类型时报错", async () => {
@@ -285,7 +286,7 @@ describe("JevClient.classify 错误处理", () => {
 
 		await expect(
 			client.classify(INPUT, CATEGORIES, { lowValueEnabled: false })
-		).rejects.toThrow(/没有返回有效的分类结果/);
+		).rejects.toThrow(t("errNoValidCategory"));
 	});
 
 	it("401 不重试", async () => {
@@ -294,7 +295,7 @@ describe("JevClient.classify 错误处理", () => {
 
 		await expect(
 			client.classify(INPUT, CATEGORIES, { lowValueEnabled: false })
-		).rejects.toThrow(/API Key/);
+		).rejects.toThrow(t("err401"));
 		expect(captured).toHaveLength(1);
 	});
 
@@ -334,7 +335,7 @@ describe("JevClient.classify 错误处理", () => {
 
 		await expect(
 			client.classify(INPUT, CATEGORIES, { lowValueEnabled: false })
-		).rejects.toThrow(/过载/);
+		).rejects.toThrow(t("err529"));
 		expect(captured).toHaveLength(3);
 	});
 

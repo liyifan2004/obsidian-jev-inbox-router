@@ -1,5 +1,6 @@
 import { requestUrl } from "obsidian";
 import { MAX_CONTENT_CHARS, VALUE_LEVELS } from "./constants";
+import { t } from "./i18n";
 import type {
 	CategoryConfig,
 	JevAnswerChoice,
@@ -59,24 +60,24 @@ function truncate(text: string, max: number): string {
 	if (text.length <= max) return text;
 	const head = Math.floor(max * 0.7);
 	const tail = max - head;
-	return `${text.slice(0, head)}\n\n…（此处省略 ${text.length - max} 字）…\n\n${text.slice(-tail)}`;
+	return `${text.slice(0, head)}\n\n${t("truncatedOmitted", { count: text.length - max })}\n\n${text.slice(-tail)}`;
 }
 
 function explain(status: number, text: string): string {
-	if (status < 0) return `网络请求失败：${text}`;
+	if (status < 0) return t("errNetwork", { text });
 	switch (status) {
 		case 401:
-			return "API Key 无效或已过期（401）";
+			return t("err401");
 		case 403:
-			return "没有访问权限（403），请检查 Key 所属账号是否已从 waitlist 放行";
+			return t("err403");
 		case 422:
-			return `请求体校验失败（422）：${text.slice(0, 300)}`;
+			return t("err422", { text: text.slice(0, 300) });
 		case 429:
-			return "触发限流（429），稍后重试";
+			return t("err429");
 		case 529:
-			return "TypeSafe 服务过载（529），稍后重试";
+			return t("err529");
 		default:
-			return `JEV 请求失败（${status}）：${text.slice(0, 300)}`;
+			return t("errHttp", { status, text: text.slice(0, 300) });
 	}
 }
 
@@ -101,12 +102,12 @@ export class JevClient {
 		const config = this.getConfig();
 		const apiKey = config.apiKey.trim();
 		if (!apiKey) {
-			throw new JevError("尚未填写 API Key。请到 设置 → JEV Inbox Router → JEV 接口 里填入。");
+			throw new JevError(t("errNoApiKey"));
 		}
 
 		const active = categories.filter((c) => c.enabled);
 		if (active.length < 2) {
-			throw new JevError("至少需要启用 2 个分类才能做单选判断。");
+			throw new JevError(t("errNeedTwoCategories"));
 		}
 
 		const criteria: Record<string, string> = {};
@@ -117,15 +118,14 @@ export class JevClient {
 		const questions: Record<string, unknown> = {
 			category: {
 				type: "choice",
-				instructions:
-					"这条笔记本质上属于哪一类？只根据内容判断归属，不要评价它的文笔，也不要因为写得短就认为它没价值。",
+				instructions: t("questionCategory"),
 				criteria,
 			},
 		};
 		if (options.lowValueEnabled) {
 			questions.value = {
 				type: "score",
-				instructions: "这条笔记对使用者未来的长期价值有多高？",
+				instructions: t("questionValue"),
 				criteria: VALUE_LEVELS,
 			};
 		}
@@ -182,7 +182,7 @@ export class JevClient {
 			if (status >= 200 && status < 300 && json) {
 				if (json.error) {
 					throw new JevError(
-						`JEV 返回错误：${JSON.stringify(json.error).slice(0, 300)}`,
+						t("errJevReturned", { json: JSON.stringify(json.error).slice(0, 300) }),
 						status
 					);
 				}
@@ -198,7 +198,7 @@ export class JevClient {
 			if (attempt < this.maxAttempts - 1) await sleep(this.retryBaseMs * (attempt + 1));
 		}
 
-		throw lastError ?? new JevError("JEV 请求失败");
+		throw lastError ?? new JevError(t("errRequestFailed"));
 	}
 
 	private toDecision(
@@ -210,13 +210,13 @@ export class JevClient {
 		const category = answers.category as JevAnswerChoice | undefined;
 
 		if (!category || category.type !== "choice" || typeof category.choice !== "string") {
-			throw new JevError("JEV 没有返回有效的分类结果，请检查分类配置。");
+			throw new JevError(t("errNoValidCategory"));
 		}
 
 		const chosenKey = category.choice;
 		const chosen = active.find((c) => c.key === chosenKey);
 		if (!chosen) {
-			throw new JevError(`JEV 返回了未知分类「${chosenKey}」，请检查分类配置是否刚被改动。`);
+			throw new JevError(t("errUnknownCategory", { key: chosenKey }));
 		}
 
 		const raw = category.probabilities ?? {};

@@ -1,11 +1,12 @@
 import type { App } from "obsidian";
 import { afterEach, describe, expect, it } from "vitest";
 import { BLOCK_END, BLOCK_START, MAX_CONTENT_CHARS } from "../src/constants";
+import { t } from "../src/i18n";
 import { JevClient } from "../src/jev-client";
 import { InboxRouter, type RouterHost } from "../src/router";
 import type { CacheEntry, JevSettings, UndoEntry } from "../src/types";
 import { FakeVault, parseFrontmatter } from "./helpers/fake-vault";
-import { makeSettings } from "./helpers/fixtures";
+import { makeDecision, makeSettings } from "./helpers/fixtures";
 import { __setRequestHandler, makeResponse, type RequestUrlParam } from "./mocks/obsidian";
 
 // ------------------------------------------------------------------ 测试脚手架
@@ -155,7 +156,13 @@ describe("route：正常分流", () => {
 		const text = vault.text("要做的事/随手记.md");
 		expect(text).toContain(BLOCK_START);
 		expect(text).toContain(BLOCK_END);
-		expect(text).toContain("**去向**：D 待办事项 → `要做的事`");
+		expect(text).toContain(
+			t("blockDestination", {
+				key: "D",
+				label: makeDecision().categoryLabel,
+				target: "`要做的事`",
+			})
+		);
 		expect(text).toContain("明天上午十点跟张总过路线图");
 	});
 
@@ -206,10 +213,10 @@ describe("route：门槛拦下时不移动", () => {
 		const result = await router.route(file as never);
 
 		expect(result.moved).toBe(false);
-		expect(result.blockedReason).toContain("置信度");
+		expect(result.blockedReason).toBe(t("gateConfidenceLow", { p: 30, threshold: 40 }));
 		expect(vault.has("Inbox/随手记.md")).toBe(true);
-		expect(vault.text("Inbox/随手记.md")).toContain("**未自动分流的原因**");
-		expect(vault.text("Inbox/随手记.md")).toContain("（未移动）");
+		expect(vault.text("Inbox/随手记.md")).toContain(t("blockBlockedReason", { reason: "" }));
+		expect(vault.text("Inbox/随手记.md")).toContain(t("notMovedSuffix"));
 	});
 
 	it("领先优势不够时同样不移动", async () => {
@@ -261,7 +268,7 @@ describe("route：被判为「应该删除」时的处置", () => {
 		const result = await router.route(file as never);
 
 		expect(result.moved).toBe(false);
-		expect(result.blockedReason).toContain("应该删除");
+		expect(result.blockedReason).toBe(t("blockedDeletionMark"));
 		expect(vault.has("Inbox/随手记.md")).toBe(true);
 	});
 
@@ -628,6 +635,8 @@ describe("决策对象", () => {
 
 		await router.route(file as never);
 
-		expect(vault.text("要做的事/随手记.md")).toContain("**长期价值**：4/4");
+		expect(vault.text("要做的事/随手记.md")).toContain(
+			t("blockValue", { index: 4, total: 4, level: "" })
+		);
 	});
 });

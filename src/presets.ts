@@ -1,12 +1,16 @@
 import { DEFAULT_CATEGORIES } from "./constants";
+import { uiIsZh } from "./i18n";
 import type { CategoryConfig } from "./types";
 
 /**
  * 内置的「组织方式」预设。
  *
  * 纯数据 + 纯函数：不碰 Obsidian API，可独立测试。
- * 每套预设必须含一个 key 为 F 或 label 含「删除」的分类——
+ * 每套预设必须含一个 key 为 F 或 label 含删除语义的分类——
  * src/rules.ts 的 resolveDeletionKey() 靠它识别「应该删除」，缺了这条逻辑就失效。
+ *
+ * 名称、描述与分类文案按 Obsidian UI 语言在模块加载时选择 zh/en 快照；
+ * inboxFolder 与目标文件夹名是 vault 的实际路径，保留原样不翻译。
  */
 
 export interface PresetDefinition {
@@ -22,7 +26,7 @@ export interface PresetDefinition {
 	categories: CategoryConfig[];
 }
 
-export const ORGANIZATION_PRESETS: PresetDefinition[] = [
+const PRESETS_ZH: PresetDefinition[] = [
 	{
 		id: "simple",
 		name: "极简收件箱",
@@ -313,6 +317,300 @@ export const ORGANIZATION_PRESETS: PresetDefinition[] = [
 	},
 ];
 
+const PRESETS_EN: PresetDefinition[] = [
+	{
+		id: "simple",
+		name: "Minimal inbox",
+		description: "No methodology to learn — just a usable starting point.",
+		inboxFolder: "Inbox",
+		categories: DEFAULT_CATEGORIES,
+	},
+	{
+		id: "para",
+		name: "PARA",
+		description: "PARA by Tiago Forte, layered by actionability.",
+		inboxFolder: "0 收集箱",
+		categories: [
+			{
+				key: "P",
+				label: "Projects",
+				short: "Proj",
+				description: "Things with a clear goal and deadline; archive when done.",
+				folder: "1 项目",
+				tag: "project",
+				enabled: true,
+				color: "#4C8DFF",
+			},
+			{
+				key: "A",
+				label: "Areas",
+				short: "Area",
+				description: "Long-term responsibilities: health, finances, team, learning.",
+				folder: "2 领域",
+				tag: "area",
+				enabled: true,
+				color: "#3DC9B0",
+			},
+			{
+				key: "R",
+				label: "Resources",
+				short: "Res",
+				description: "Interesting topic material with no deadline.",
+				folder: "3 资料",
+				tag: "resource",
+				enabled: true,
+				color: "#9B8CFF",
+			},
+			{
+				key: "V",
+				label: "Archive",
+				short: "Archive",
+				description: "Finished projects and no-longer-active material.",
+				folder: "4 归档",
+				tag: "archive",
+				enabled: true,
+				color: "#7F8C99",
+			},
+			{
+				key: "F",
+				label: "To delete",
+				short: "Delete",
+				description: "Worthless fragments, test text, mis-pastes.",
+				folder: "5 待删除",
+				tag: "to-delete",
+				enabled: true,
+				color: "#FF5C5C",
+			},
+		],
+	},
+	{
+		id: "zettelkasten",
+		name: "Zettelkasten",
+		description: "Ahrens' smart notes: literature → permanent → structure.",
+		inboxFolder: "收集箱",
+		categories: [
+			{
+				key: "L",
+				label: "Literature notes",
+				short: "Lit",
+				description: "Others' ideas excerpted while reading, with sources.",
+				folder: "卡片盒/文献笔记",
+				tag: "",
+				enabled: true,
+				color: "#FF8A3D",
+			},
+			{
+				key: "P",
+				label: "Permanent notes",
+				short: "Perm",
+				description: "Atomic ideas written in your own words, self-contained.",
+				folder: "卡片盒/永久笔记",
+				tag: "",
+				enabled: true,
+				color: "#4C8DFF",
+			},
+			{
+				key: "S",
+				label: "Structure notes",
+				short: "Struct",
+				description: "Indexes and MOCs connecting notes.",
+				folder: "卡片盒/结构",
+				tag: "",
+				enabled: true,
+				color: "#9B8CFF",
+			},
+			{
+				key: "J",
+				label: "Project notes",
+				short: "Proj",
+				description: "Temporary notes serving current projects.",
+				folder: "项目",
+				tag: "",
+				enabled: true,
+				color: "#3DC9B0",
+			},
+			{
+				key: "F",
+				label: "To delete",
+				short: "Delete",
+				description: "Outdated excerpts and fragments.",
+				folder: "归档/待删除",
+				tag: "",
+				enabled: true,
+				color: "#FF5C5C",
+			},
+		],
+	},
+	{
+		id: "gtd",
+		name: "GTD",
+		description: "Allen's Getting Things Done, organized by next action.",
+		inboxFolder: "GTD/收集箱",
+		categories: [
+			{
+				key: "N",
+				label: "Next actions",
+				short: "Action",
+				description: "Concrete things you can do right now.",
+				folder: "GTD/下一步行动",
+				tag: "",
+				enabled: true,
+				color: "#FFC53D",
+			},
+			{
+				key: "W",
+				label: "Waiting for",
+				short: "Wait",
+				description: "Handed to someone else, awaiting feedback.",
+				folder: "GTD/等待中",
+				tag: "",
+				enabled: true,
+				color: "#4C8DFF",
+			},
+			{
+				key: "S",
+				label: "Someday/maybe",
+				short: "Someday",
+				description: "Ideas not for now but possibly later.",
+				folder: "GTD/将来也许",
+				tag: "",
+				enabled: true,
+				color: "#9B8CFF",
+			},
+			{
+				key: "R",
+				label: "Reference",
+				short: "Ref",
+				description: "Material supporting your actions.",
+				folder: "GTD/参考资料",
+				tag: "",
+				enabled: true,
+				color: "#3DC9B0",
+			},
+			{
+				key: "F",
+				label: "To delete",
+				short: "Delete",
+				description: "Junk and mis-pastes.",
+				folder: "GTD/垃圾",
+				tag: "",
+				enabled: true,
+				color: "#FF5C5C",
+			},
+		],
+	},
+	{
+		id: "johnny-decimal",
+		name: "Johnny Decimal",
+		description: "Two-digit numbering gives every folder a fixed address.",
+		inboxFolder: "00-09 收集箱",
+		categories: [
+			{
+				key: "P",
+				label: "Plans",
+				short: "Plans",
+				description: "10-19: ongoing plans and tasks.",
+				folder: "10-19 计划",
+				tag: "",
+				enabled: true,
+				color: "#4C8DFF",
+			},
+			{
+				key: "A",
+				label: "Areas",
+				short: "Areas",
+				description: "20-29: areas you own long-term.",
+				folder: "20-29 领域",
+				tag: "",
+				enabled: true,
+				color: "#3DC9B0",
+			},
+			{
+				key: "T",
+				label: "Topics",
+				short: "Topics",
+				description: "30-49: study topics and research.",
+				folder: "30-49 主题",
+				tag: "",
+				enabled: true,
+				color: "#9B8CFF",
+			},
+			{
+				key: "R",
+				label: "Reference",
+				short: "Ref",
+				description: "50-79: reference material.",
+				folder: "50-79 参考",
+				tag: "",
+				enabled: true,
+				color: "#FF8A3D",
+			},
+			{
+				key: "F",
+				label: "To delete",
+				short: "Delete",
+				description: "90-99: to clean up.",
+				folder: "90-99 待清理",
+				tag: "",
+				enabled: true,
+				color: "#FF5C5C",
+			},
+		],
+	},
+	{
+		id: "lyt",
+		name: "LYT/MOC",
+		description: "Nick Milo's LYT: organize by links and MOCs, not folders.",
+		inboxFolder: "收集箱",
+		categories: [
+			{
+				key: "M",
+				label: "MOC maps",
+				short: "MOC",
+				description: "Map notes aggregating links on a topic.",
+				folder: "地图",
+				tag: "",
+				enabled: true,
+				color: "#4C8DFF",
+			},
+			{
+				key: "N",
+				label: "Atomic notes",
+				short: "Atomic",
+				description: "Notes that make exactly one point.",
+				folder: "笔记",
+				tag: "",
+				enabled: true,
+				color: "#3DC9B0",
+			},
+			{
+				key: "S",
+				label: "Clippings",
+				short: "Clip",
+				description: "Clippings, excerpts, quotes.",
+				folder: "素材",
+				tag: "",
+				enabled: true,
+				color: "#FF8A3D",
+			},
+			{
+				key: "F",
+				label: "To delete",
+				short: "Delete",
+				description: "Duplicates and worthless fragments.",
+				folder: "待删除",
+				tag: "",
+				enabled: true,
+				color: "#FF5C5C",
+			},
+		],
+	},
+];
+
+export const ORGANIZATION_PRESETS: PresetDefinition[] = uiIsZh()
+	? PRESETS_ZH
+	: PRESETS_EN;
+
 /** 按 id 查预设 */
 export function presetById(id: string): PresetDefinition | undefined {
 	return ORGANIZATION_PRESETS.find((p) => p.id === id);
@@ -322,7 +620,7 @@ export function presetById(id: string): PresetDefinition | undefined {
  * 追加模式：把预设分类的 key 重映射到未被占用的字母，返回新数组（不改入参）。
  *
  * 依次扫描 A~Z，跳过 taken 与本次已分配的字母；字母耗尽时退回 K1、K2… 形式。
- * 即便 key 被改写，「删除类」识别仍成立：resolveDeletionKey 会退回 label 含「删除」的分类。
+ * 即便 key 被改写，「删除类」识别仍成立：resolveDeletionKey 会退回 key=F 的分类。
  */
 export function remapPresetKeys(
 	categories: CategoryConfig[],

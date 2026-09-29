@@ -60,10 +60,10 @@ describe("ORGANIZATION_PRESETS", () => {
 		}
 	});
 
-	it("每套都含删除类分类（key=F 或 label 含「删除」）", () => {
+	it("每套都含删除类分类（key=F 或 label 含删除语义，中英皆可）", () => {
 		for (const preset of ORGANIZATION_PRESETS) {
 			const hasDeletion = preset.categories.some(
-				(c) => c.key === "F" || c.label.includes("删除")
+				(c) => c.key === "F" || /删除|delete/i.test(c.label)
 			);
 			expect(hasDeletion).toBe(true);
 		}

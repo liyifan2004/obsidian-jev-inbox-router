@@ -98,6 +98,27 @@ export class App {
 	metadataCache!: unknown;
 }
 
+// ---------------------------------------------------------------- moment 桩
+
+/**
+ * i18n（src/i18n.ts）与数据层（constants.ts / presets.ts）通过 moment.locale()
+ * 检测 Obsidian UI 语言。测试里默认 "zh-cn"（与插件主要受众一致），
+ * 需要 "en" 用例可用 __setLocale("en") 临时切换。
+ */
+let mockLocale = "zh-cn";
+
+export function __setLocale(locale: string): void {
+	mockLocale = locale;
+}
+
+export function __getLocale(): string {
+	return mockLocale;
+}
+
+export const moment: { locale(): string } = {
+	locale: () => mockLocale,
+};
+
 export class Plugin {
 	app!: App;
 	manifest!: unknown;

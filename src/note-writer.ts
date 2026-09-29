@@ -1,4 +1,5 @@
 import { BLOCK_END, BLOCK_START } from "./constants";
+import { t } from "./i18n";
 import type { JevSettings, RouterDecision } from "./types";
 
 export interface BlockMeta {
@@ -34,7 +35,7 @@ function formatTime(at: number): string {
 }
 
 function marginText(margin: number): string {
-	if (!Number.isFinite(margin)) return "远高于次选";
+	if (!Number.isFinite(margin)) return t("marginFarAbove");
 	return `${margin.toFixed(2)}×`;
 }
 
@@ -45,36 +46,44 @@ function buildItems(
 	meta: BlockMeta
 ): string[] {
 	const items: string[] = [];
-	const target = decision.targetFolder ? `\`${decision.targetFolder}\`` : "库根目录";
+	const target = decision.targetFolder ? `\`${decision.targetFolder}\`` : t("vaultRoot");
 
 	items.push(
-		`**去向**：${decision.categoryKey} ${decision.categoryLabel} → ${target}${
-			meta.moved ? "" : "（未移动）"
-		}`
+		t("blockDestination", {
+			key: decision.categoryKey,
+			label: decision.categoryLabel,
+			target,
+		}) + (meta.moved ? "" : t("notMovedSuffix"))
 	);
 	items.push(
-		`**置信度**：${pct(decision.confidence)} · 门槛 ${pct(
-			settings.confidenceThreshold
-		)} · 领先优势 ${marginText(decision.margin)}`
+		t("blockConfidence", {
+			pct: pct(decision.confidence),
+			threshold: pct(settings.confidenceThreshold),
+			margin: marginText(decision.margin),
+		})
 	);
 	if (decision.valueIndex !== null) {
 		items.push(
-			`**长期价值**：${decision.valueIndex + 1}/${decision.valueLevels.length} — ${
-				decision.valueLevels[decision.valueIndex]
-			}`
+			t("blockValue", {
+				index: decision.valueIndex + 1,
+				total: decision.valueLevels.length,
+				level: decision.valueLevels[decision.valueIndex],
+			})
 		);
 	}
 	if (settings.blockShowProbabilities) {
 		items.push(
-			`**概率分布**：${decision.ranking
-				.map((r) => `${r.key} ${bar(r.p)} ${pct(r.p)}`)
-				.join(" · ")}`
+			t("blockProbabilities", {
+				distribution: decision.ranking
+					.map((r) => `${r.key} ${bar(r.p)} ${pct(r.p)}`)
+					.join(" · "),
+			})
 		);
 	}
 	if (meta.blockedReason) {
-		items.push(`**未自动分流的原因**：${meta.blockedReason}`);
+		items.push(t("blockBlockedReason", { reason: meta.blockedReason }));
 	}
-	items.push(`**判断模型**：${decision.model} · ${formatTime(decision.at)}`);
+	items.push(t("blockModel", { model: decision.model, time: formatTime(decision.at) }));
 	return items;
 }
 
@@ -89,7 +98,7 @@ export function buildRouteBlock(
 	settings: JevSettings,
 	meta: BlockMeta
 ): string {
-	const title = `JEV 分流判断 → ${decision.categoryKey} ${decision.categoryLabel}`;
+	const title = t("blockTitle", { key: decision.categoryKey, label: decision.categoryLabel });
 	const items = buildItems(decision, settings, meta);
 
 	if (settings.blockStyle === "callout") {
@@ -107,7 +116,7 @@ export function buildRouteBlock(
 	return [
 		BLOCK_START,
 		`<details class="jev-route-block">`,
-		`<summary>${title}（${pct(decision.confidence)}）</summary>`,
+		`<summary>${t("detailsSummary", { title, pct: pct(decision.confidence) })}</summary>`,
 		"",
 		body,
 		"",

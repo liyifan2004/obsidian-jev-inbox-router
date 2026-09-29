@@ -1,4 +1,5 @@
 import { pct } from "./note-writer";
+import { t } from "./i18n";
 import type { JevSettings, RouterDecision } from "./types";
 
 /**
@@ -19,15 +20,19 @@ export function evaluateGate(decision: RouterDecision, settings: JevSettings): G
 	if (decision.confidence < settings.confidenceThreshold) {
 		return {
 			passed: false,
-			reason: `置信度 ${Math.round(decision.confidence * 100)}% 低于门槛 ${Math.round(
-				settings.confidenceThreshold * 100
-			)}%`,
+			reason: t("gateConfidenceLow", {
+				p: Math.round(decision.confidence * 100),
+				threshold: Math.round(settings.confidenceThreshold * 100),
+			}),
 		};
 	}
 	if (Number.isFinite(decision.margin) && decision.margin < settings.marginThreshold) {
 		return {
 			passed: false,
-			reason: `首选只比次选高 ${decision.margin.toFixed(2)} 倍，低于门槛 ${settings.marginThreshold}×`,
+			reason: t("gateMarginLow", {
+				margin: decision.margin.toFixed(2),
+				threshold: settings.marginThreshold,
+			}),
 		};
 	}
 	return { passed: true };
@@ -35,13 +40,14 @@ export function evaluateGate(decision: RouterDecision, settings: JevSettings): G
 
 /**
  * 找出代表「应该删除」的分类。
- * 优先用 key = F，其次用标签里含「删除」的分类；都没有或都被禁用时返回 null。
+ * 优先用 key = F，其次用标签里含删除语义（「删除」/ delete）的分类；
+ * 都没有或都被禁用时返回 null。
  */
 export function resolveDeletionKey(settings: JevSettings): string | null {
 	const active = settings.categories.filter((c) => c.enabled);
 	const byKey = active.find((c) => c.key === "F");
 	if (byKey) return byKey.key;
-	const byLabel = active.find((c) => c.label.includes("删除"));
+	const byLabel = active.find((c) => /删除|delete/i.test(c.label));
 	if (byLabel) return byLabel.key;
 	return null;
 }
@@ -106,13 +112,21 @@ export function statusViewForRoute(input: {
 		return {
 			kind: "ok",
 			color,
-			text: `${short} ${pct(decision.confidence)} → ${decision.targetFolder || "库根目录"}`,
+			text: t("statusMoved", {
+				short,
+				pct: pct(decision.confidence),
+				folder: decision.targetFolder || t("vaultRoot"),
+			}),
 		};
 	}
 	if (blockedReason) {
-		return { kind: "warn", color, text: `${short} ${pct(decision.confidence)} 存疑` };
+		return {
+			kind: "warn",
+			color,
+			text: t("statusUncertain", { short, pct: pct(decision.confidence) }),
+		};
 	}
-	return { kind: "warn", color, text: `${short} 已在目标位置` };
+	return { kind: "warn", color, text: t("statusAtTarget", { short }) };
 }
 
 /**
@@ -134,7 +148,7 @@ export function statusViewForSuggestion(input: {
 	const category = settings.categories.find((c) => c.key === decision.categoryKey);
 	const short = category?.short || decision.categoryLabel;
 	const color = category?.color ?? "#7F8C99";
-	const target = decision.targetFolder || "库根目录";
+	const target = decision.targetFolder || t("vaultRoot");
 
 	if (typeof currentPath === "string" && currentPath.trim() !== "") {
 		const at = normalizeFolder(currentPath);
@@ -142,12 +156,20 @@ export function statusViewForSuggestion(input: {
 		const atTarget =
 			goal === "" ? !at.includes("/") : at === goal || at.startsWith(`${goal}/`);
 		if (atTarget) {
-			return { kind: "ok", color, text: `已在 ${goal || "库根目录"}` };
+			return { kind: "ok", color, text: t("suggestAtTarget", { folder: goal || t("vaultRoot") }) };
 		}
 	}
 
 	const passed = evaluateGate(decision, settings).passed;
 	return passed
-		? { kind: "ok", color, text: `建议 ${short} ${pct(decision.confidence)} → ${target}` }
-		: { kind: "warn", color, text: `建议 ${short} ${pct(decision.confidence)} 存疑 → ${target}` };
+		? {
+				kind: "ok",
+				color,
+				text: t("suggestOk", { short, pct: pct(decision.confidence), target }),
+			}
+		: {
+				kind: "warn",
+				color,
+				text: t("suggestUncertain", { short, pct: pct(decision.confidence), target }),
+			};
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BLOCK_END, BLOCK_START } from "../src/constants";
+import { t } from "../src/i18n";
 import {
 	applyFrontmatterFields,
 	buildFrontmatterFields,
@@ -15,6 +16,9 @@ import { makeDecision, makeSettings } from "./helpers/fixtures";
 
 const DECISION = makeDecision();
 const TOP_BLOCK = buildRouteBlock(DECISION, makeSettings(), { moved: true });
+
+/** 从「**标签**：值」模板里取标签部分，语言无关地断言某行是否存在 */
+const labelOf = (s: string): string => s.split(/：|:/)[0];
 
 describe("pct", () => {
 	it("把概率四舍五入成百分比", () => {
@@ -58,7 +62,8 @@ describe("buildRouteBlock / callout 样式", () => {
 	});
 
 	it("标题行是 callout 头", () => {
-		expect(block.split("\n")[1]).toBe("> [!jev-route] JEV 分流判断 → D 待办事项");
+		const title = t("blockTitle", { key: "D", label: DECISION.categoryLabel });
+		expect(block.split("\n")[1]).toBe(`> [!jev-route] ${title}`);
 	});
 
 	it("每一条信息都是引用块里的列表项（否则 Obsidian 会把多行挤成一段）", () => {
@@ -73,10 +78,14 @@ describe("buildRouteBlock / callout 样式", () => {
 	});
 
 	it("写出去向、置信度、概率分布、模型与时间", () => {
-		expect(block).toContain("**去向**：D 待办事项 → `要做的事`");
-		expect(block).toContain("**置信度**：48%");
-		expect(block).toContain("**概率分布**：");
-		expect(block).toContain("jev-1.13.0 · 2026-09-21 18:20");
+		expect(block).toContain(
+			t("blockDestination", { key: "D", label: DECISION.categoryLabel, target: "`要做的事`" })
+		);
+		expect(block).toContain(
+			t("blockConfidence", { pct: "48%", threshold: "40%", margin: "1.41×" })
+		);
+		expect(block).toContain(t("blockProbabilities", { distribution: "" }));
+		expect(block).toContain(t("blockModel", { model: "jev-1.13.0", time: "2026-09-21 18:20" }));
 	});
 
 	it("没有移动时明确标注，并写出原因", () => {
@@ -85,15 +94,17 @@ describe("buildRouteBlock / callout 样式", () => {
 			makeSettings(),
 			{ moved: false, blockedReason: "置信度 48% 低于门槛 60%" }
 		);
-		expect(blocked).toContain("（未移动）");
-		expect(blocked).toContain("**未自动分流的原因**：置信度 48% 低于门槛 60%");
+		expect(blocked).toContain(t("notMovedSuffix"));
+		expect(blocked).toContain(
+			t("blockBlockedReason", { reason: "置信度 48% 低于门槛 60%" })
+		);
 	});
 
 	it("关掉概率分布开关后不再输出该行", () => {
 		const plain = buildRouteBlock(DECISION, makeSettings({ blockShowProbabilities: false }), {
 			moved: true,
 		});
-		expect(plain).not.toContain("**概率分布**");
+		expect(plain).not.toContain(labelOf(t("blockProbabilities", { distribution: "x" })));
 	});
 
 	it("valueIndex 为 null 时不输出长期价值行", () => {
@@ -102,17 +113,21 @@ describe("buildRouteBlock / callout 样式", () => {
 			makeSettings(),
 			{ moved: true }
 		);
-		expect(noValue).not.toContain("**长期价值**");
+		expect(noValue).not.toContain(labelOf(t("blockValue", { index: 1, total: 1, level: "x" })));
 	});
 });
 
 describe("buildRouteBlock / details 与 quote 样式", () => {
+	const title = t("blockTitle", { key: "D", label: DECISION.categoryLabel });
+
 	it("details 样式用可折叠块，正文是普通列表", () => {
 		const block = buildRouteBlock(DECISION, makeSettings({ blockStyle: "details" }), {
 			moved: true,
 		});
 		expect(block).toContain('<details class="jev-route-block">');
-		expect(block).toContain("<summary>JEV 分流判断 → D 待办事项（48%）</summary>");
+		expect(block).toContain(
+			`<summary>${t("detailsSummary", { title, pct: "48%" })}</summary>`
+		);
 		const listLines = block.split("\n").filter((l) => l.startsWith("- "));
 		expect(listLines.length).toBeGreaterThan(3);
 		expect(block).not.toContain("> - ");
@@ -122,7 +137,7 @@ describe("buildRouteBlock / details 与 quote 样式", () => {
 		const block = buildRouteBlock(DECISION, makeSettings({ blockStyle: "quote" }), {
 			moved: true,
 		});
-		expect(block).toContain("> **JEV 分流判断 → D 待办事项**");
+		expect(block).toContain(`> **${title}**`);
 		expect(block).not.toContain("[!jev-route]");
 	});
 });

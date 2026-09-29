@@ -1,7 +1,7 @@
 {
   "id": "jev-inbox-router",
   "name": "JEV Inbox Router",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "1.5.0",
   "description": "Route every new note to the right folder with JEV, a typed probability model. It never writes content; it only decides where things should go.",
   "author": "liyifan2004",

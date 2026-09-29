@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { t } from "../src/i18n";
 import {
 	evaluateGate,
 	isDeletionDecision,
@@ -11,6 +12,11 @@ import {
 } from "../src/rules";
 import { makeDecision, makeSettings } from "./helpers/fixtures";
 
+/** 分类短名随数据层语言走，测试按 settings 取值，保证语言无关 */
+function shortOf(key: string): string {
+	return makeSettings().categories.find((c) => c.key === key)!.short;
+}
+
 describe("evaluateGate", () => {
 	it("置信度与领先优势都达标时放行", () => {
 		const gate = evaluateGate(makeDecision(), makeSettings());
@@ -21,8 +27,7 @@ describe("evaluateGate", () => {
 	it("置信度不足时拦下，并说明差在哪", () => {
 		const gate = evaluateGate(makeDecision({ confidence: 0.3 }), makeSettings());
 		expect(gate.passed).toBe(false);
-		expect(gate.reason).toContain("置信度");
-		expect(gate.reason).toContain("30%");
+		expect(gate.reason).toBe(t("gateConfidenceLow", { p: 30, threshold: 40 }));
 	});
 
 	it("领先优势不足时拦下，即使置信度达标", () => {
@@ -191,7 +196,9 @@ describe("statusViewForRoute", () => {
 			moved: true,
 		});
 		expect(view.kind).toBe("ok");
-		expect(view.text).toBe("待办 48% → 要做的事");
+		expect(view.text).toBe(
+			t("statusMoved", { short: shortOf("D"), pct: "48%", folder: "要做的事" })
+		);
 		expect(view.color).toBe("#FFC53D");
 	});
 
@@ -201,7 +208,9 @@ describe("statusViewForRoute", () => {
 			settings: makeSettings(),
 			moved: true,
 		});
-		expect(view.text).toBe("待办 48% → 库根目录");
+		expect(view.text).toBe(
+			t("statusMoved", { short: shortOf("D"), pct: "48%", folder: t("vaultRoot") })
+		);
 	});
 
 	it("被门槛拦下时提示存疑", () => {
@@ -212,7 +221,7 @@ describe("statusViewForRoute", () => {
 			blockedReason: "置信度不够",
 		});
 		expect(view.kind).toBe("warn");
-		expect(view.text).toBe("待办 48% 存疑");
+		expect(view.text).toBe(t("statusUncertain", { short: shortOf("D"), pct: "48%" }));
 	});
 
 	it("本来就在目标位置时另给一句", () => {
@@ -222,7 +231,7 @@ describe("statusViewForRoute", () => {
 			moved: false,
 		});
 		expect(view.kind).toBe("warn");
-		expect(view.text).toBe("待办 已在目标位置");
+		expect(view.text).toBe(t("statusAtTarget", { short: shortOf("D") }));
 	});
 
 	it("分类已从设置里删掉时退回分类全名，不显示 undefined", () => {
@@ -233,7 +242,13 @@ describe("statusViewForRoute", () => {
 			settings,
 			moved: true,
 		});
-		expect(view.text).toBe("待办事项 48% → 要做的事");
+		expect(view.text).toBe(
+			t("statusMoved", {
+				short: makeDecision().categoryLabel,
+				pct: "48%",
+				folder: "要做的事",
+			})
+		);
 		expect(view.color).toBe("#7F8C99");
 	});
 });
@@ -245,7 +260,9 @@ describe("statusViewForSuggestion", () => {
 			settings: makeSettings(),
 		});
 		expect(view.kind).toBe("ok");
-		expect(view.text).toBe("建议 待办 48% → 要做的事");
+		expect(view.text).toBe(
+			t("suggestOk", { short: shortOf("D"), pct: "48%", target: "要做的事" })
+		);
 		expect(view.color).toBe("#FFC53D");
 	});
 
@@ -255,7 +272,9 @@ describe("statusViewForSuggestion", () => {
 			settings: makeSettings(),
 		});
 		expect(view.kind).toBe("warn");
-		expect(view.text).toBe("建议 待办 30% 存疑 → 要做的事");
+		expect(view.text).toBe(
+			t("suggestUncertain", { short: shortOf("D"), pct: "30%", target: "要做的事" })
+		);
 	});
 
 	it("目标是库根目录时文案写清楚", () => {
@@ -263,7 +282,9 @@ describe("statusViewForSuggestion", () => {
 			decision: makeDecision({ targetFolder: "" }),
 			settings: makeSettings(),
 		});
-		expect(view.text).toBe("建议 待办 48% → 库根目录");
+		expect(view.text).toBe(
+			t("suggestOk", { short: shortOf("D"), pct: "48%", target: t("vaultRoot") })
+		);
 	});
 
 	it("已经在目标文件夹里时提示无需移动", () => {
@@ -273,7 +294,7 @@ describe("statusViewForSuggestion", () => {
 			currentPath: "要做的事/明天的安排.md",
 		});
 		expect(view.kind).toBe("ok");
-		expect(view.text).toBe("已在 要做的事");
+		expect(view.text).toBe(t("suggestAtTarget", { folder: "要做的事" }));
 	});
 
 	it("目标为库根目录且文件就在库根时同样提示", () => {
@@ -282,7 +303,7 @@ describe("statusViewForSuggestion", () => {
 			settings: makeSettings(),
 			currentPath: "根上的笔记.md",
 		});
-		expect(view.text).toBe("已在 库根目录");
+		expect(view.text).toBe(t("suggestAtTarget", { folder: t("vaultRoot") }));
 	});
 
 	it("文件在别的文件夹时不算已在目标位置", () => {
@@ -291,7 +312,9 @@ describe("statusViewForSuggestion", () => {
 			settings: makeSettings(),
 			currentPath: "Inbox/明天的安排.md",
 		});
-		expect(view.text).toBe("建议 待办 48% → 要做的事");
+		expect(view.text).toBe(
+			t("suggestOk", { short: shortOf("D"), pct: "48%", target: "要做的事" })
+		);
 	});
 
 	it("分类已从设置里删掉时退回分类全名与中性色", () => {
@@ -301,7 +324,13 @@ describe("statusViewForSuggestion", () => {
 			decision: makeDecision(),
 			settings,
 		});
-		expect(view.text).toBe("建议 待办事项 48% → 要做的事");
+		expect(view.text).toBe(
+			t("suggestOk", {
+				short: makeDecision().categoryLabel,
+				pct: "48%",
+				target: "要做的事",
+			})
+		);
 		expect(view.color).toBe("#7F8C99");
 	});
 });

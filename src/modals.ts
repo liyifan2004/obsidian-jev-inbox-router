@@ -1,4 +1,5 @@
 import { App, Menu, Modal, Setting, SuggestModal, TFile } from "obsidian";
+import { t } from "./i18n";
 import { pct } from "./note-writer";
 import { evaluateGate } from "./rules";
 import type { CategoryConfig, JevSettings, RouterDecision } from "./types";
@@ -35,7 +36,7 @@ export class JevDecisionModal extends Modal {
 		super.onOpen();
 		const { contentEl } = this;
 		contentEl.addClass("jev-modal");
-		this.titleEl.setText("JEV 分流判断");
+		this.titleEl.setText(t("decisionTitle"));
 
 		const d = this.decision;
 
@@ -50,7 +51,7 @@ export class JevDecisionModal extends Modal {
 		target.createSpan({ cls: "jev-arrow", text: "→" });
 		const targetPath = target.createSpan({
 			cls: "jev-path",
-			text: d.targetFolder ? d.targetFolder : "（库根目录）",
+			text: d.targetFolder ? d.targetFolder : t("rootParens"),
 		});
 		if (d.targetFolder) targetPath.setAttribute("title", d.targetFolder);
 
@@ -62,29 +63,35 @@ export class JevDecisionModal extends Modal {
 			kv.createEl("dd", { text: value });
 		};
 		addKv(
-			"置信度",
-			`${pct(d.confidence)}（门槛 ${pct(this.settings.confidenceThreshold)}）`
+			t("kvConfidence"),
+			t("confidenceValue", {
+				value: pct(d.confidence),
+				threshold: pct(this.settings.confidenceThreshold),
+			})
 		);
 		addKv(
-			"领先优势",
+			t("kvMargin"),
 			Number.isFinite(d.margin)
-				? `${d.margin.toFixed(2)}×（门槛 ${this.settings.marginThreshold}×）`
-				: "远高于次选"
+				? t("marginValue", {
+						value: `${d.margin.toFixed(2)}×`,
+						threshold: `${this.settings.marginThreshold}×`,
+					})
+				: t("marginFarAbove")
 		);
 		addKv(
-			"长期价值",
+			t("kvValue"),
 			d.valueIndex === null
-				? "未评估"
+				? t("valueNotAssessed")
 				: `${d.valueIndex + 1}/${d.valueLevels.length} — ${d.valueLevels[d.valueIndex]}`
 		);
 		const gate = evaluateGate(d, this.settings);
-		addKv("要求", gate.passed ? "已过双门槛" : (gate.reason ?? "未达标"));
+		addKv(t("kvRequirement"), gate.passed ? t("gatePassed") : (gate.reason ?? t("gateNotPassed")));
 
 		// ---- 尾注 ----
 		const foot = contentEl.createDiv({ cls: "jev-foot" });
 		const footParts = [d.model, formatTime(d.at)];
 		if (d.usage?.input_tokens) footParts.push(`${d.usage.input_tokens} input tokens`);
-		if (d.modelConfidence !== null) footParts.push(`自报置信 ${pct(d.modelConfidence)}`);
+		if (d.modelConfidence !== null) footParts.push(t("modelConfidenceFoot", { pct: pct(d.modelConfidence) }));
 		footParts.forEach((part, index) => {
 			if (index > 0) foot.createSpan({ cls: "jev-foot-sep", text: " · " });
 			foot.createSpan({ text: part });
@@ -117,7 +124,9 @@ export class JevDecisionModal extends Modal {
 
 		// ---- 操作行：一个 CTA + 一个次级 + 一个 ⋯ ----
 		const actions = contentEl.createDiv({ cls: "jev-actions" });
-		const ctaText = d.targetFolder ? `移动到 ${d.targetFolder}` : "移动到 库根目录";
+		const ctaText = d.targetFolder
+			? t("ctaMoveTo", { folder: d.targetFolder })
+			: t("ctaMoveToRoot");
 
 		new Setting(actions)
 			.addButton((b) =>
@@ -127,15 +136,15 @@ export class JevDecisionModal extends Modal {
 				})
 			)
 			.addButton((b) =>
-				b.setButtonText("换个去向…").onClick(() => {
+				b.setButtonText(t("btnOther")).onClick(() => {
 					this.close();
 					void this.actions.pickOther();
 				})
 			)
 			.addExtraButton((b) => {
-				b.setIcon("more-horizontal").setTooltip("更多操作");
+				b.setIcon("more-horizontal").setTooltip(t("moreActions"));
 				b.extraSettingsEl.addClass("jev-more-btn");
-				b.extraSettingsEl.setAttribute("aria-label", "更多操作");
+				b.extraSettingsEl.setAttribute("aria-label", t("moreActions"));
 				b.onClick(() => this.openMoreMenu(b.extraSettingsEl));
 			});
 	}
@@ -145,7 +154,7 @@ export class JevDecisionModal extends Modal {
 		const menu = new Menu();
 		menu.addItem((item) =>
 			item
-				.setTitle("重新判断")
+				.setTitle(t("menuReroute"))
 				.setIcon("refresh-cw")
 				.onClick(() => {
 					this.close();
@@ -154,7 +163,7 @@ export class JevDecisionModal extends Modal {
 		);
 		menu.addItem((item) =>
 			item
-				.setTitle("移除判断信息块")
+				.setTitle(t("menuRemoveBlock"))
 				.setIcon("trash")
 				.onClick(() => {
 					this.close();
@@ -188,13 +197,13 @@ export class CategoryPickerModal extends Modal {
 	onOpen(): void {
 		super.onOpen();
 		this.contentEl.addClass("jev-modal");
-		this.titleEl.setText("选择去向分类");
+		this.titleEl.setText(t("pickerTitle"));
 
 		const enabled = this.categories.filter((c) => c.enabled);
 		if (enabled.length === 0) {
 			this.contentEl.createDiv({
 				cls: "jev-empty",
-				text: "没有启用中的分类，请先在设置里启用",
+				text: t("pickerEmpty"),
 			});
 			return;
 		}
@@ -208,7 +217,7 @@ export class CategoryPickerModal extends Modal {
 			row.createSpan({ cls: "jev-picker-title", text: `${c.key} ${c.label}` });
 			row.createSpan({
 				cls: "jev-picker-sub",
-				text: c.folder ? c.folder : "（库根目录）",
+				text: c.folder ? c.folder : t("rootParens"),
 			});
 			row.addEventListener("click", () => {
 				this.close();
@@ -243,7 +252,7 @@ export class FolderPickerModal extends SuggestModal<string> {
 		// 必须调用基类：SuggestModal 在基类 onOpen() 里创建 inputEl / resultContainerEl
 		// 并启动 updateSuggestions()，不调用会导致 this.inputEl 为 undefined 而报错。
 		super.onOpen();
-		this.setPlaceholder("输入关键字过滤…");
+		this.setPlaceholder(t("folderPickerPlaceholder"));
 		this.inputEl.addClass("text-input");
 		this.inputEl.addClass("jev-search");
 	}
@@ -252,7 +261,7 @@ export class FolderPickerModal extends SuggestModal<string> {
 		const kw = query.trim().toLowerCase();
 		const matches = this.folders.filter((f) => {
 			if (!kw) return true;
-			const text = f === "" ? "库根目录" : f;
+			const text = f === "" ? t("vaultRoot") : f;
 			return f.toLowerCase().includes(kw) || text.toLowerCase().includes(kw);
 		});
 		return matches.slice(0, 200);
@@ -260,7 +269,7 @@ export class FolderPickerModal extends SuggestModal<string> {
 
 	renderSuggestion(folder: string, el: HTMLElement): void {
 		el.addClass("jev-row");
-		el.createSpan({ cls: "jev-path", text: folder === "" ? "（库根目录）" : folder });
+		el.createSpan({ cls: "jev-path", text: folder === "" ? t("rootParens") : folder });
 	}
 
 	onChooseSuggestion(folder: string): void {
@@ -295,7 +304,7 @@ export class ConfirmModal extends Modal {
 
 		const bar = new Setting(this.contentEl);
 		bar.addButton((b) =>
-			b.setButtonText("取消").onClick(() => {
+			b.setButtonText(t("cancel")).onClick(() => {
 				this.close();
 			})
 		);

@@ -10,6 +10,7 @@ import {
 	upsertRouteBlock,
 } from "./note-writer";
 import { evaluateGate, isDeletionDecision, isInInboxPath, isTooShort, normalizeFolder } from "./rules";
+import { t } from "./i18n";
 import type { CacheEntry, JevSettings, RouterDecision, UndoEntry } from "./types";
 
 /** 分流结果 */
@@ -169,10 +170,10 @@ export class InboxRouter {
 		if (isDeletionDecision(decision, settings)) {
 			if (settings.deletionHandling === "ignore") {
 				allowMove = false;
-				blockedReason = "该笔记被判为「应该删除」，当前设置是不处理";
+				blockedReason = t("blockedDeletionIgnore");
 			} else if (settings.deletionHandling === "mark") {
 				allowMove = false;
-				blockedReason = "该笔记被判为「应该删除」，已标记但未移动（插件不会删除文件）";
+				blockedReason = t("blockedDeletionMark");
 			}
 		}
 

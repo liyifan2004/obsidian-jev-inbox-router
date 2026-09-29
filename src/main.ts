@@ -1,5 +1,6 @@
 import { Menu, Notice, Plugin, TFile } from "obsidian";
 import { DEFAULT_SETTINGS } from "./constants";
+import { t } from "./i18n";
 import { JevClient, JevError } from "./jev-client";
 import { CategoryPickerModal, FolderPickerModal, JevDecisionModal } from "./modals";
 import { buildRouteBlock, upsertRouteBlock } from "./note-writer";
@@ -61,7 +62,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		this.registerMenus();
 		this.registerVaultEvents();
 
-		this.addRibbonIcon("inbox", "JEV：扫描收件箱并处理", () => void this.scanInbox());
+		this.addRibbonIcon("inbox", t("ribbonScan"), () => void this.scanInbox());
 	}
 
 	onunload(): void {
@@ -186,7 +187,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 				// 状态栏主项是真控件：可聚焦、Enter/Space 可激活
 				this.statusEl.setAttribute("role", "button");
 				this.statusEl.setAttribute("tabindex", "0");
-				this.statusEl.setAttribute("aria-label", "查看最近一次判断详情");
+				this.statusEl.setAttribute("aria-label", t("ariaShowDecision"));
 				this.statusEl.addEventListener("click", () => this.showLastDecision());
 				this.statusEl.addEventListener("keydown", (event) => {
 					if (event.key === "Enter" || event.key === " ") {
@@ -195,7 +196,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 					}
 				});
 			}
-			this.setStatus("ready", "就绪");
+			this.setStatus("ready", t("statusReady"));
 		} else {
 			if (this.statusEl) {
 				this.statusEl.detach();
@@ -229,10 +230,10 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		if (color) dot.style.setProperty("--jev-cat", color);
 		// 就绪态只留「JEV」；结果态直接显示内容（不再有常驻「JEV ·」前缀）
 		el.createSpan({ cls: "jev-status-text", text: kind === "ready" ? "JEV" : text });
-		el.createSpan({ cls: "jev-hint", text: "查看判断详情" });
+		el.createSpan({ cls: "jev-hint", text: t("statusHint") });
 
 		if ((kind === "ok" || kind === "warn" || kind === "error") && this.settings.statusBarClearMs > 0) {
-			this.statusTimer = window.setTimeout(() => this.setStatus("ready", "就绪"), this.settings.statusBarClearMs);
+			this.statusTimer = window.setTimeout(() => this.setStatus("ready", t("statusReady")), this.settings.statusBarClearMs);
 		}
 	}
 
@@ -245,8 +246,8 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			el.addClass("jev-status", "jev-undo");
 			el.setAttribute("role", "button");
 			el.setAttribute("tabindex", "0");
-			el.setAttribute("aria-label", "撤销上一次分流");
-			el.setText("撤销");
+			el.setAttribute("aria-label", t("ariaUndo"));
+			el.setText(t("undoLabel"));
 			const activate = () => void this.undoLast();
 			el.addEventListener("click", activate);
 			el.addEventListener("keydown", (event) => {
@@ -286,7 +287,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			el.addClass("jev-status", "jev-accept");
 			el.setAttribute("role", "button");
 			el.setAttribute("tabindex", "0");
-			el.setText("接受");
+			el.setText(t("acceptLabel"));
 			const activate = () => void this.acceptSuggestion();
 			el.addEventListener("click", activate);
 			el.addEventListener("keydown", (event) => {
@@ -324,7 +325,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 
 		const file = this.app.vault.getAbstractFileByPath(suggestion.file.path);
 		if (!(file instanceof TFile)) {
-			new Notice("找不到这条笔记（可能已被移动或删除）。", 6000);
+			new Notice(t("noticeNoteMissing"), 6000);
 			return;
 		}
 		const result = await this.moveFileTo(file, suggestion.decision.targetFolder);
@@ -359,7 +360,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 	private registerCommands(): void {
 		this.addCommand({
 			id: "route-current-note",
-			name: "判断当前笔记并给出去向建议",
+			name: t("cmdRouteSuggest"),
 			checkCallback: (checking) => {
 				const file = this.activeMarkdownFile();
 				if (!file) return false;
@@ -370,7 +371,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 
 		this.addCommand({
 			id: "route-current-note-move",
-			name: "判断当前笔记并直接移动",
+			name: t("cmdRouteMove"),
 			checkCallback: (checking) => {
 				const file = this.activeMarkdownFile();
 				if (!file) return false;
@@ -381,7 +382,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 
 		this.addCommand({
 			id: "analyze-current-note",
-			name: "只判断当前笔记（不移动）",
+			name: t("cmdJudgeOnly"),
 			checkCallback: (checking) => {
 				const file = this.activeMarkdownFile();
 				if (!file) return false;
@@ -392,13 +393,13 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 
 		this.addCommand({
 			id: "scan-inbox",
-			name: "扫描收件箱并批量处理",
+			name: t("cmdScanInbox"),
 			callback: () => void this.scanInbox(),
 		});
 
 		this.addCommand({
 			id: "accept-last-suggestion",
-			name: "接受上一次建议并移动笔记",
+			name: t("cmdAcceptLast"),
 			checkCallback: (checking) => {
 				if (!this.lastSuggestion) return false;
 				if (!checking) void this.acceptSuggestion();
@@ -408,26 +409,26 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 
 		this.addCommand({
 			id: "undo-last-route",
-			name: "撤销上一次分流",
+			name: t("cmdUndoLast"),
 			callback: () => void this.undoLast(),
 		});
 
 		this.addCommand({
 			id: "show-last-decision",
-			name: "查看最近一次判断详情",
+			name: t("cmdShowDecision"),
 			callback: () => this.showLastDecision(),
 		});
 
 		this.addCommand({
 			id: "toggle-auto-route",
-			name: "切换自动分流开关",
+			name: t("cmdToggleAutoRoute"),
 			callback: async () => {
 				this.settings.autoRouteEnabled = !this.settings.autoRouteEnabled;
 				await this.persist();
-				new Notice(`自动分流已${this.settings.autoRouteEnabled ? "开启" : "关闭"}`);
+				new Notice(this.settings.autoRouteEnabled ? t("noticeAutoRouteOn") : t("noticeAutoRouteOff"));
 				this.setStatus(
 					this.settings.autoRouteEnabled ? "ok" : "ready",
-					`自动分流 ${this.settings.autoRouteEnabled ? "开" : "关"}`
+					this.settings.autoRouteEnabled ? t("statusAutoRouteOn") : t("statusAutoRouteOff")
 				);
 			},
 		});
@@ -437,19 +438,19 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		const addItems = (menu: Menu, file: TFile) => {
 			menu.addItem((item) =>
 				item
-					.setTitle("JEV：判断并给出去向建议")
+					.setTitle(t("menuSuggest"))
 					.setIcon("inbox")
 					.onClick(() => void this.runRoute(file, { force: true, suggest: true }))
 			);
 			menu.addItem((item) =>
 				item
-					.setTitle("JEV：只判断（不移动）")
+					.setTitle(t("menuJudgeOnly"))
 					.setIcon("search")
 					.onClick(() => void this.runRoute(file, { dryRun: true, force: true }))
 			);
 			menu.addItem((item) =>
 				item
-					.setTitle("JEV：移动到指定文件夹…")
+					.setTitle(t("menuMoveTo"))
 					.setIcon("folder-input")
 					.onClick(() => {
 						new FolderPickerModal(this.app, this.router.getAllFolders(), (folder) => {
@@ -536,8 +537,8 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		if (this.busy.has(file.path)) return null;
 
 		if (!this.settings.apiKey.trim()) {
-			this.setStatus("error", "缺少 API Key");
-			new Notice("请在 设置 → JEV Inbox Router 里填写 API Key。", 8000);
+			this.setStatus("error", t("statusMissingKey"));
+			new Notice(t("noticeMissingKey"), 8000);
 			return null;
 		}
 
@@ -550,13 +551,13 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 
 		this.busy.add(file.path);
 		this.suppressUntil = Date.now() + 5000;
-		this.setStatus("busy", `分析中：${file.basename}`);
+		this.setStatus("busy", t("statusAnalyzing", { name: file.basename }));
 
 		try {
 			if (!options.force) {
 				const raw = await this.app.vault.cachedRead(file);
 				if (this.router.tooShort(raw, this.settings.minChars)) {
-					this.setStatus("ready", "内容太短，跳过");
+					this.setStatus("ready", t("statusTooShort"));
 					return null;
 				}
 			}
@@ -577,8 +578,8 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			return result;
 		} catch (error) {
 			const message = error instanceof JevError ? error.message : String(error);
-			this.setStatus("error", "判断失败");
-			if (!options.quiet) new Notice(`JEV 判断失败：${message}`, 12000);
+			this.setStatus("error", t("statusJudgeFailed"));
+			if (!options.quiet) new Notice(t("noticeJudgeFailed", { message }), 12000);
 			else console.error("[jev-inbox-router]", error);
 			return null;
 		} finally {
@@ -625,13 +626,16 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 
 		if (result.moved) {
 			new Notice(
-				`已分流：${d.categoryKey} ${d.categoryLabel}（${Math.round(
-					d.confidence * 100
-				)}%）→ ${d.targetFolder || "库根目录"}`,
+				t("noticeRouted", {
+					key: d.categoryKey,
+					label: d.categoryLabel,
+					pct: Math.round(d.confidence * 100),
+					folder: d.targetFolder || t("vaultRoot"),
+				}),
 				5000
 			);
 		} else if (result.blockedReason) {
-			new Notice(`已标记但未移动：${result.blockedReason}`, 8000);
+			new Notice(t("noticeMarkedOnly", { reason: result.blockedReason }), 8000);
 		}
 	}
 
@@ -657,7 +661,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		this.setStatus(view.kind, view.text, view.color);
 		if (file) {
 			this.lastSuggestion = { decision: d, file };
-			this.showAcceptStatus(`接受建议：移动到 ${d.targetFolder || "库根目录"}`);
+			this.showAcceptStatus(t("ariaAccept", { folder: d.targetFolder || t("vaultRoot") }));
 		}
 	}
 
@@ -668,8 +672,8 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			const fromPath = file.path;
 			const target = await this.router.moveTo(file, folder);
 			const decision: RouterDecision = this.lastResult?.result.decision ?? {
-				categoryKey: "自定义",
-				categoryLabel: "手动指定",
+				categoryKey: t("manualKey"),
+				categoryLabel: t("manualLabel"),
 				targetFolder: folder,
 				confidence: 1,
 				modelConfidence: null,
@@ -691,16 +695,21 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			this.lastResult = { result, file: after instanceof TFile ? after : file };
 			if (result.moved) {
 				this.pushUndo({ path: target, previousPath: fromPath, previousContent: null, at: Date.now() });
-				this.setStatus("ok", `已移到 ${folder || "库根目录"}`);
+				this.setStatus("ok", t("statusMovedTo", { folder: folder || t("vaultRoot") }));
 				this.showUndoStatus();
-				if (!quiet) new Notice(`已移动到 ${folder || "库根目录"}`);
+				if (!quiet) new Notice(t("noticeMovedTo", { folder: folder || t("vaultRoot") }));
 			} else {
-				this.setStatus("ready", "已经在目标文件夹");
+				this.setStatus("ready", t("statusAlreadyAtTarget"));
 			}
 			return result;
 		} catch (error) {
-			this.setStatus("error", "移动失败");
-			new Notice(`移动失败：${error instanceof Error ? error.message : String(error)}`, 8000);
+			this.setStatus("error", t("statusMoveFailed"));
+			new Notice(
+				t("noticeMoveFailed", {
+					message: error instanceof Error ? error.message : String(error),
+				}),
+				8000
+			);
 			return null;
 		} finally {
 			this.busy.delete(file.path);
@@ -730,7 +739,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		}
 
 		if (files.length === 0) {
-			new Notice(`收件箱里没有待处理的 Markdown 笔记（${folders.join(" / ")}）`, 6000);
+			new Notice(t("noticeInboxEmpty", { folders: folders.join(" / ") }), 6000);
 			return;
 		}
 
@@ -746,7 +755,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 
 		for (const file of files) {
 			index++;
-			notice.setMessage(`JEV 处理中… ${index}/${files.length}\n${file.path}`);
+			notice.setMessage(t("noticeScanProgress", { index, total: files.length, path: file.path }));
 			const current = this.app.vault.getAbstractFileByPath(file.path);
 			if (!(current instanceof TFile)) {
 				skipped++;
@@ -768,13 +777,26 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		notice.hide();
 		new Notice(
 			suggestionMode
-				? `扫描完成：共 ${index} 篇 · 已给出建议 ${suggested} 条 · 跳过 ${skipped} · 失败 ${failed}`
-				: `扫描完成：共 ${index} 篇 · 移动 ${moved} · 仅标记 ${blocked} · 跳过 ${skipped} · 失败 ${failed}`,
+				? t("noticeScanSuggest", {
+						total: index,
+						suggested,
+						skipped,
+						failed,
+					})
+				: t("noticeScanMoved", {
+						total: index,
+						moved,
+						marked: blocked,
+						skipped,
+						failed,
+					}),
 			9000
 		);
 		this.setStatus(
 			"ok",
-			suggestionMode ? `扫描完成，已给出建议 ${suggested} 条` : `扫描完成 ${moved} 篇已移动`
+			suggestionMode
+				? t("statusScanSuggest", { count: suggested })
+				: t("statusScanMoved", { count: moved })
 		);
 	}
 
@@ -783,17 +805,17 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 	private async undoLast(): Promise<void> {
 		const entry = this.undoStack.pop();
 		if (!entry) {
-			new Notice("没有可撤销的分流记录（插件重启后只保留最近几次）。", 6000);
+			new Notice(t("noticeNothingToUndo"), 6000);
 			return;
 		}
 		this.suppressUntil = Date.now() + 4000;
 		const ok = await this.router.undo(entry);
 		if (ok) {
-			new Notice(`已撤销：${entry.path} → ${entry.previousPath}`, 6000);
-			this.setStatus("ok", "已撤销上一次分流");
+			new Notice(t("noticeUndone", { path: entry.path, previousPath: entry.previousPath }), 6000);
+			this.setStatus("ok", t("statusUndone"));
 		} else {
-			new Notice(`撤销失败：找不到 ${entry.path}（可能已被移动或删除）。`, 8000);
-			this.setStatus("error", "撤销失败");
+			new Notice(t("noticeUndoFailed", { path: entry.path }), 8000);
+			this.setStatus("error", t("statusUndoFailed"));
 		}
 		// 无论成败都立刻收起撤销入口，不依赖 12s 定时器回收
 		this.hideUndoStatus();
@@ -804,7 +826,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 
 	showLastDecision(): void {
 		if (!this.lastResult) {
-			new Notice("这个会话里还没有产生过判断结果。", 5000);
+			new Notice(t("noticeNoDecisionYet"), 5000);
 			return;
 		}
 		this.showDecisionModal(this.lastResult.result);
@@ -835,7 +857,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 				removeBlock: async () => {
 					if (!file) return;
 					await this.router.removeBlock(file);
-					new Notice("已移除判断块。");
+					new Notice(t("noticeBlockRemoved"));
 				},
 			},
 			file
