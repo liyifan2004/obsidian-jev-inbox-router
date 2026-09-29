@@ -8,6 +8,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Obsidian plugin](https://img.shields.io/badge/Obsidian-Plugin-purple?style=flat-square)](https://obsidian.md)
 
+简体中文 | [English](README.en.md)
+
 用 [JEV](https://typesafe.ai)（TypeSafe 的 System One 模型）判断"这条笔记属于哪一类"，然后把它送到对应的文件夹。
 
 **它不替你写任何东西。** 没有摘要、没有扩写、没有改写正文。它只回答一个问题：
