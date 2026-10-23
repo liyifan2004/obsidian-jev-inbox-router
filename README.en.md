@@ -29,7 +29,7 @@ Everything that lands in Obsidian — quick notes, web clippings, WeChat forward
 | C To research | `_附件-归档-模板/归档` |
 | D To-do | `要做的事` |
 | E Reference material | `_附件-归档-模板/附件` |
-| F Should be deleted | Mark only, never move |
+| F Should be deleted | Marked by default, never moved (configurable: move to a folder, or ignore entirely) |
 
 Category names, criteria descriptions, and target folders are all editable in the settings page to match your own folder structure.
 
@@ -95,7 +95,7 @@ Then enable JEV Inbox Router in Obsidian's Settings → Community plugins.
 
 | Command | Purpose |
 |---|---|
-| `npm test` | Unit tests (vitest, 161 cases) |
+| `npm test` | Unit tests (vitest, 197 cases) |
 | `npm run test:watch` | Watch mode |
 | `npm run typecheck` | `tsc --noEmit`, covering `src/` and `test/` |
 | `npm run build` | esbuild bundle to `main.js` |
@@ -121,7 +121,7 @@ JEV doesn't generate text; it returns typed answers with probabilities (`choice`
 
 ## Known limitations
 
-- Undo history keeps only the last 10 operations, stored in `data.json`; notes longer than 20k characters only get their location rolled back, not their content.
+- Undo history keeps only the last 10 operations, stored in `data.json`; notes longer than 20k characters only get their location rolled back, not their content. **If you edited a note after routing, undo only moves it back — it never overwrites your edits with the old content.**
 - Each judgment sends the note body (up to 6000 characters) plus your own frontmatter to TypeSafe. **The judgment block and `jev-*` fields written by the plugin are never sent** — otherwise the next judgment would be biased by the previous conclusion. If that bothers you, keep auto-routing off.
 - The cache fingerprint **only covers the note body**, not frontmatter. Changing only frontmatter (tags, aliases, etc.) won't trigger a re-judgment.
 - Raw probabilities of a six-way single choice are naturally low (0.3–0.6 is normal); don't compare them directly with binary-classifier confidence. The plugin uses "probability of the chosen option" and "top ÷ runner-up", not the model's self-reported `confidence`.

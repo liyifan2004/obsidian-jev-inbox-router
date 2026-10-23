@@ -3,7 +3,7 @@
   "name": "JEV Inbox Router",
   "version": "0.2.0",
   "minAppVersion": "1.5.0",
-  "description": "Route every new note to the right folder with JEV, a typed probability model. It never writes content; it only decides where things should go.",
+  "description": "Route each new note to the right folder with JEV, a typed probability model, and record the decision in the note. It never generates or rewrites your content.",
   "author": "liyifan2004",
   "authorUrl": "https://github.com/liyifan2004",
   "isDesktopOnly": false
