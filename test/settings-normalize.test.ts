@@ -192,4 +192,42 @@ describe("normalizeSettings", () => {
 			normalizeSettings({ previousCategories: "oops" as unknown as never }).previousCategories
 		).toBeNull();
 	});
+
+	it("布尔字段被写脏（字符串 / 数字 / null / 对象）时退回默认值", () => {
+		const settings = normalizeSettings({
+			autoRouteEnabled: "false" as unknown as boolean,
+			blockEnabled: 0 as unknown as boolean,
+			writeFrontmatter: 1 as unknown as boolean,
+			statusBarEnabled: "yes" as unknown as boolean,
+			lowValueEnabled: null as unknown as boolean,
+			blockShowProbabilities: [] as unknown as boolean,
+			autoRouteRequireConfirm: {} as unknown as boolean,
+		});
+		expect(settings.autoRouteEnabled).toBe(DEFAULT_SETTINGS.autoRouteEnabled);
+		expect(settings.blockEnabled).toBe(DEFAULT_SETTINGS.blockEnabled);
+		expect(settings.writeFrontmatter).toBe(DEFAULT_SETTINGS.writeFrontmatter);
+		expect(settings.statusBarEnabled).toBe(DEFAULT_SETTINGS.statusBarEnabled);
+		expect(settings.lowValueEnabled).toBe(DEFAULT_SETTINGS.lowValueEnabled);
+		expect(settings.blockShowProbabilities).toBe(DEFAULT_SETTINGS.blockShowProbabilities);
+		expect(settings.autoRouteRequireConfirm).toBe(DEFAULT_SETTINGS.autoRouteRequireConfirm);
+	});
+
+	it("布尔字段合法时原样保留（false 也是合法值，不被默认值顶掉）", () => {
+		const settings = normalizeSettings({
+			autoRouteEnabled: true,
+			blockEnabled: false,
+			writeFrontmatter: false,
+			statusBarEnabled: false,
+			lowValueEnabled: false,
+			blockShowProbabilities: false,
+			autoRouteRequireConfirm: true,
+		});
+		expect(settings.autoRouteEnabled).toBe(true);
+		expect(settings.blockEnabled).toBe(false);
+		expect(settings.writeFrontmatter).toBe(false);
+		expect(settings.statusBarEnabled).toBe(false);
+		expect(settings.lowValueEnabled).toBe(false);
+		expect(settings.blockShowProbabilities).toBe(false);
+		expect(settings.autoRouteRequireConfirm).toBe(true);
+	});
 });

@@ -77,6 +77,8 @@ const en = {
 	noticeNothingToUndo:
 		"Nothing to undo (only the most recent routes survive a restart).",
 	noticeUndone: "Undone: {path} → {previousPath}",
+	noticeUndoneKeptEdits:
+		"Moved back: {path} → {previousPath} (content kept — the note was edited after routing)",
 	noticeUndoFailed:
 		"Undo failed: {path} not found (it may have been moved or deleted).",
 	noticeNoDecisionYet: "No judgment has been made in this session yet.",
@@ -100,6 +102,8 @@ const en = {
 		'This note was judged as "should delete"; the current setting is to leave it untouched',
 	blockedDeletionMark:
 		'This note was judged as "should delete"; marked but not moved (the plugin never deletes files)',
+	blockedSuggestionMode:
+		"Suggestion mode: not moved (accept the suggestion or run the move command)",
 
 	// ---- note-writer.ts：判断块 ----
 	blockTitle: "JEV routing decision → {key} {label}",
@@ -420,6 +424,7 @@ const zh: Record<keyof typeof en, string> = {
 		"扫描完成：共 {total} 篇 · 移动 {moved} · 仅标记 {marked} · 跳过 {skipped} · 失败 {failed}",
 	noticeNothingToUndo: "没有可撤销的分流记录（插件重启后只保留最近几次）。",
 	noticeUndone: "已撤销：{path} → {previousPath}",
+	noticeUndoneKeptEdits: "已移回原位：{path} → {previousPath}（笔记在分流后被编辑过，内容未回滚）",
 	noticeUndoFailed: "撤销失败：找不到 {path}（可能已被移动或删除）。",
 	noticeNoDecisionYet: "这个会话里还没有产生过判断结果。",
 	noticeBlockRemoved: "已移除判断块。",
@@ -440,6 +445,7 @@ const zh: Record<keyof typeof en, string> = {
 	blockedDeletionIgnore: "该笔记被判为「应该删除」，当前设置是不处理",
 	blockedDeletionMark:
 		"该笔记被判为「应该删除」，已标记但未移动（插件不会删除文件）",
+	blockedSuggestionMode: "建议模式：未移动（点状态栏「接受」或用命令移动）",
 
 	// ---- note-writer.ts：判断块 ----
 	blockTitle: "JEV 分流判断 → {key} {label}",

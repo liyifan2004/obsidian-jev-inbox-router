@@ -33,6 +33,11 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback
 	return allowed.includes(value as T) ? (value as T) : fallback;
 }
 
+/** 布尔字段：必须真的是布尔值（data.json 手改可能写成 "false" / 0 / 1），否则退回默认值 */
+function bool(value: unknown, fallback: boolean): boolean {
+	return typeof value === "boolean" ? value : fallback;
+}
+
 export function normalizeCategory(raw: RawCategory | null | undefined): CategoryConfig {
 	const source = raw ?? {};
 	const key = typeof source.key === "string" && source.key ? source.key : "?";
@@ -94,6 +99,21 @@ export function normalizeSettings(raw: RawSettings | null | undefined): JevSetti
 	merged.marginThreshold = num(merged.marginThreshold, DEFAULT_SETTINGS.marginThreshold);
 	merged.statusBarClearMs = num(merged.statusBarClearMs, DEFAULT_SETTINGS.statusBarClearMs);
 	merged.cacheMinutes = num(merged.cacheMinutes, DEFAULT_SETTINGS.cacheMinutes);
+
+	// 布尔字段全部按「不可信输入」校验，脏值一律退回默认值
+	merged.autoRouteEnabled = bool(merged.autoRouteEnabled, DEFAULT_SETTINGS.autoRouteEnabled);
+	merged.autoRouteRequireConfirm = bool(
+		merged.autoRouteRequireConfirm,
+		DEFAULT_SETTINGS.autoRouteRequireConfirm
+	);
+	merged.lowValueEnabled = bool(merged.lowValueEnabled, DEFAULT_SETTINGS.lowValueEnabled);
+	merged.blockEnabled = bool(merged.blockEnabled, DEFAULT_SETTINGS.blockEnabled);
+	merged.blockShowProbabilities = bool(
+		merged.blockShowProbabilities,
+		DEFAULT_SETTINGS.blockShowProbabilities
+	);
+	merged.writeFrontmatter = bool(merged.writeFrontmatter, DEFAULT_SETTINGS.writeFrontmatter);
+	merged.statusBarEnabled = bool(merged.statusBarEnabled, DEFAULT_SETTINGS.statusBarEnabled);
 
 	merged.watchScope = oneOf<WatchScope>(
 		merged.watchScope,

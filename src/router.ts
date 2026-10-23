@@ -32,6 +32,15 @@ export interface RouteOptions {
 	allowMove?: boolean;
 }
 
+/** 撤销时内容回写的结果 */
+export type UndoContentOutcome = "restored" | "skipped" | "none";
+
+export interface UndoOutcome {
+	ok: boolean;
+	/** restored=内容已回写；skipped=笔记在分流后被改过，只挪回位置；none=没有内容快照 */
+	content: UndoContentOutcome;
+}
+
 /** 宿主（由 main.ts 提供）需要暴露的能力 */
 export interface RouterHost {
 	getSettings(): JevSettings;
@@ -183,15 +192,22 @@ export class InboxRouter {
 			blockedReason = gate.reason;
 		}
 
-		// ---- 写判断块 ----
+		// 建议模式（调用方显式不许移动）：写明原因，
+		// 否则日后翻到判断块只看到「（未移动）」，分不清是建议模式还是被门槛拦下
+		if (!allowMove && !blockedReason && options.allowMove === false) {
+			blockedReason = t("blockedSuggestionMode");
+		}
+
+		// ---- 写判断块 / frontmatter ----
+		// 只要写过任何东西就留快照，撤销才有得还原（以前只在写判断块时留，漏了只写 frontmatter 的情况）
 		let previousContent: string | null = null;
+		if (settings.blockEnabled || settings.writeFrontmatter) previousContent = raw;
 		if (settings.blockEnabled) {
 			const block = buildRouteBlock(decision, settings, {
 				moved: allowMove,
 				blockedReason,
 			});
 			this.host.beginSelfWrite();
-			previousContent = raw;
 			await this.app.vault.process(file, (data) =>
 				upsertRouteBlock(data, block, settings.blockPlacement)
 			);
@@ -210,6 +226,16 @@ export class InboxRouter {
 			}
 		}
 
+		// ---- 记录写完后的指纹：撤销时据此判断笔记是否又被编辑过 ----
+		let writtenHash: string | null = null;
+		if (previousContent !== null) {
+			try {
+				writtenHash = hashContent(await this.app.vault.read(file));
+			} catch {
+				writtenHash = null;
+			}
+		}
+
 		// ---- 移动文件 ----
 		if (allowMove) {
 			const moved = await this.moveFile(file, targetFolder);
@@ -222,6 +248,7 @@ export class InboxRouter {
 					path: moved,
 					previousPath: fromPath,
 					previousContent,
+					writtenHash,
 					at: Date.now(),
 				});
 			}
@@ -266,14 +293,35 @@ export class InboxRouter {
 		await this.app.vault.process(file, (data) => stripRouteBlock(data));
 	}
 
-	/** 撤销一次分流：把文件挪回去，并恢复当时的内容 */
-	async undo(entry: UndoEntry): Promise<boolean> {
+	/**
+	 * 撤销一次分流：把文件挪回去，并在安全时恢复当时的内容。
+	 *
+	 * 内容回写前先比对 writtenHash：分流之后用户又编辑过的笔记只挪回位置、
+	 * 不回写内容，避免用旧快照覆盖用户的改动。
+	 */
+	async undo(entry: UndoEntry): Promise<UndoOutcome> {
 		const file = this.app.vault.getAbstractFileByPath(entry.path);
-		if (!(file instanceof TFile)) return false;
+		if (!(file instanceof TFile)) return { ok: false, content: "none" };
 
+		let content: UndoContentOutcome = "none";
 		if (entry.previousContent !== null) {
-			this.host.beginSelfWrite();
-			await this.app.vault.modify(file, entry.previousContent);
+			let safeToRestore = true;
+			if (entry.writtenHash) {
+				try {
+					const current = await this.app.vault.read(file);
+					safeToRestore = hashContent(current) === entry.writtenHash;
+				} catch {
+					safeToRestore = false;
+				}
+			}
+			if (safeToRestore) {
+				this.host.beginSelfWrite();
+				const restored = entry.previousContent;
+				await this.app.vault.process(file, () => restored);
+				content = "restored";
+			} else {
+				content = "skipped";
+			}
 		}
 
 		if (entry.previousPath && entry.previousPath !== file.path) {
@@ -284,7 +332,7 @@ export class InboxRouter {
 
 		this.host.invalidateCache(entry.path);
 		this.host.invalidateCache(entry.previousPath);
-		return true;
+		return { ok: true, content };
 	}
 }
 

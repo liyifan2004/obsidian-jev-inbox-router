@@ -441,6 +441,20 @@ describe("route：同名冲突与 dryRun", () => {
 		expect(host.cache.size).toBe(0);
 		expect(host.undos).toHaveLength(0);
 	});
+
+	it("建议模式（allowMove:false）不动文件，并在判断块写明未移动的原因", async () => {
+		const { vault, host, router } = setup({});
+		const file = vault.getAbstractFileByPath("Inbox/随手记.md")!;
+
+		const result = await router.route(file as never, { allowMove: false });
+
+		expect(result.moved).toBe(false);
+		expect(result.blockedReason).toBe(t("blockedSuggestionMode"));
+		expect(vault.renameLog).toHaveLength(0);
+		expect(vault.text("Inbox/随手记.md")).toContain(t("blockedSuggestionMode"));
+		// 建议模式也照常进缓存，方便「接受」后复用
+		expect(host.cache.size).toBe(1);
+	});
 });
 
 describe("undo", () => {
@@ -450,22 +464,39 @@ describe("undo", () => {
 		const file = vault.getAbstractFileByPath("Inbox/随手记.md")!;
 		await router.route(file as never);
 
-		const ok = await router.undo(host.undos[0]);
+		const outcome = await router.undo(host.undos[0]);
 
-		expect(ok).toBe(true);
+		expect(outcome.ok).toBe(true);
+		expect(outcome.content).toBe("restored");
 		expect(vault.has("Inbox/随手记.md")).toBe(true);
 		expect(vault.text("Inbox/随手记.md")).toBe(before);
 	});
 
-	it("文件已经不存在时返回 false，不抛错", async () => {
+	it("分流后又编辑过笔记时，撤销只挪回位置、不覆盖内容", async () => {
+		const { vault, host, router } = setup({});
+		const file = vault.getAbstractFileByPath("Inbox/随手记.md")!;
+		await router.route(file as never);
+
+		const routed = vault.getAbstractFileByPath("要做的事/随手记.md")!;
+		await vault.modify(routed as never, "用户后来又写了一段重要内容");
+
+		const outcome = await router.undo(host.undos[0]);
+
+		expect(outcome.ok).toBe(true);
+		expect(outcome.content).toBe("skipped");
+		expect(vault.has("Inbox/随手记.md")).toBe(true);
+		expect(vault.text("Inbox/随手记.md")).toBe("用户后来又写了一段重要内容");
+	});
+
+	it("文件已经不存在时返回 ok=false，不抛错", async () => {
 		const { host, router } = setup({});
-		const ok = await router.undo({
+		const outcome = await router.undo({
 			path: "不存在.md",
 			previousPath: "Inbox/不存在.md",
 			previousContent: null,
 			at: Date.now(),
 		});
-		expect(ok).toBe(false);
+		expect(outcome.ok).toBe(false);
 		expect(host.undos).toHaveLength(0);
 	});
 

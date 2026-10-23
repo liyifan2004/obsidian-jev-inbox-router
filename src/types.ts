@@ -168,8 +168,14 @@ export interface UndoEntry {
 	path: string;
 	/** 分流前的路径 */
 	previousPath: string;
-	/** 写入判断块之前的内容，null 表示当时没有改动内容 */
+	/** 分流写入（判断块 / frontmatter）之前的内容，null 表示当时没有改动内容 */
 	previousContent: string | null;
+	/**
+	 * 分流写完后笔记内容的指纹。撤销时先比对当前内容：
+	 * 不一致说明用户之后又编辑过，只挪回位置、不回写内容，避免覆盖用户改动。
+	 * 缺失（旧数据）时维持回写行为。
+	 */
+	writtenHash?: string | null;
 	at: number;
 }
 

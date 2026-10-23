@@ -76,6 +76,8 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		this.acceptStatusTimer = null;
 		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
 		this.saveTimer = null;
+		// 防抖窗口内的缓存/撤销更新也要落盘，否则退出瞬间最后一次分流记录会丢
+		void this.persist();
 		// 显式移除状态栏节点，不依赖 Obsidian 自动回收
 		this.statusEl?.detach();
 		this.statusEl = null;
@@ -671,7 +673,15 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		try {
 			const fromPath = file.path;
 			const target = await this.router.moveTo(file, folder);
-			const decision: RouterDecision = this.lastResult?.result.decision ?? {
+			// 只有「本次移动的就是上次判断的那个文件、且目标一致」才复用判断结果；
+			// 否则（右键移动别的文件、或改去别处）用手工决策，目标以实际移动为准，
+			// 避免详情弹窗/撤销记录里出现与实际去向不符的旧分类。
+			const last = this.lastResult;
+			const reusable =
+				last && last.file && last.file.path === file.path && last.result.decision.targetFolder === folder
+					? last.result.decision
+					: null;
+			const decision: RouterDecision = reusable ?? {
 				categoryKey: t("manualKey"),
 				categoryLabel: t("manualLabel"),
 				targetFolder: folder,
@@ -809,9 +819,14 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			return;
 		}
 		this.suppressUntil = Date.now() + 4000;
-		const ok = await this.router.undo(entry);
-		if (ok) {
-			new Notice(t("noticeUndone", { path: entry.path, previousPath: entry.previousPath }), 6000);
+		const outcome = await this.router.undo(entry);
+		if (outcome.ok) {
+			new Notice(
+				outcome.content === "skipped"
+					? t("noticeUndoneKeptEdits", { path: entry.path, previousPath: entry.previousPath })
+					: t("noticeUndone", { path: entry.path, previousPath: entry.previousPath }),
+				6000
+			);
 			this.setStatus("ok", t("statusUndone"));
 		} else {
 			new Notice(t("noticeUndoFailed", { path: entry.path }), 8000);
