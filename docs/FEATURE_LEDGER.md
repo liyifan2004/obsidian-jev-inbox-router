@@ -167,7 +167,7 @@ JEV Inbox Router 的长期维护依据。以**当前源码与可验证行为**�
 |---|---|---|
 | `route-current-note` | 建议模式判断 | force，跳过过短检查 |
 | `route-current-note-move` | 判断并直接移动 | |
-| `analyze-current-note` | 只判断（dryRun），弹详情 | 不写块不缓存 |
+| `analyze-current-note` | 只判断（dryRun），弹详情 | 不写块；判断结果进缓存（ISS-007） |
 | `scan-inbox` | 批量扫描 | 见 F-022 |
 | `accept-last-suggestion` | 接受最近建议 | 有 lastSuggestion 才可用 |
 | `undo-last-route` | 撤销上次分流 | |
@@ -187,8 +187,9 @@ JEV Inbox Router 的长期维护依据。以**当前源码与可验证行为**�
 - **接受项**：建议模式下独立条目，同窗口期存在。
 - **撤销项**：移动成功后独立条目。
 - 三者均为真控件（role=button, tabindex），`onunload` 显式 detach。
-- **实现**：`main.ts:182-317`；样式 `styles.css`（DESIGN.md 为准）。
-- **状态**：**已实现**；视觉规范见 `DESIGN.md` / `UI-REVIEW.md`。
+- **移动端降级**：`addStatusBarItem` 官方注明移动端不可用，`Platform.isMobileApp` 时不创建状态栏项，接受/撤销改为带按钮的常驻 Notice（`new Notice(DocumentFragment)`，1.5.0 起可用）。命令面板与右键菜单入口不变。
+- **实现**：`main.ts:182-317`（桌面）、`main.ts` 的 `showMobileActionNotice`（移动端）；样式 `styles.css`（DESIGN.md 为准）。
+- **状态**：**已实现**（桌面路径有源码证据；移动端路径未经真机验证，见"待核实清单"）；视觉规范见 `DESIGN.md` / `UI-REVIEW.md`。
 - **已知问题**：批量扫描结束后"接受"项属于最后一篇（ISS-008）。
 
 ### F-018 判断详情弹窗（JevDecisionModal）
@@ -215,7 +216,7 @@ JEV Inbox Router 的长期维护依据。以**当前源码与可验证行为**�
 - **预期行为**：开 → 自动触发时走 dryRun（只判断不写任何文件），弹详情弹窗，由用户在弹窗里决定移动。
 - **实现**：`main.ts:505-514` + `report()` 的 dryRun 分支（main.ts:598-607）。
 - **状态**：**已实现**。
-- **已知问题**：dryRun 分支**忽略 quiet**——任何 dryRun 都会弹窗（自动触发即"弹窗确认"是有意的，但与批量扫描 dryRun 的组合语义要在改动时小心）；dryRun 不写缓存，同一文件反复触发会重复调用 API（ISS-007）。
+- **已知问题**：dryRun 分支**忽略 quiet**——任何 dryRun 都会弹窗（自动触发即"弹窗确认"是有意的，但与批量扫描 dryRun 的组合语义要在改动时小心）。dryRun 已于 2026-11-02 起写判断缓存（ISS-007 已处理），同一内容不再重复计费。
 
 ### F-022 批量扫描收件箱
 - **预期行为**：列收件箱（或全库）md 文件 → 逐篇 runRoute（quiet），150ms 间隔 → 汇总 Notice（建议数/移动数/跳过/失败）。
@@ -228,17 +229,20 @@ JEV Inbox Router 的长期维护依据。以**当前源码与可验证行为**�
 ## 5. 状态、数据与设置
 
 ### F-023 判断结果缓存
-- **预期行为**：按路径 + 正文指纹缓存 `RouterDecision`，`cacheMinutes`（默认 30）内复用；上限 300 条，按时间淘汰；移动后旧路径失效、新路径续存。
-- **实现**：`main.ts:98-115`、`router.ts:136-163`。
-- **状态**：**已验证**（router.test.ts 缓存用例）。
+- **预期行为**：按路径 + 正文指纹缓存 `RouterDecision`，`cacheMinutes`（默认 30）内复用；上限 300 条，按时间淘汰；移动后旧路径失效、新路径续存。**dryRun 也写缓存**（不改文件内容，指纹依然有效）。
+- **实现**：`main.ts:98-115`、`router.ts:136-179`。
+- **状态**：**已验证**（router.test.ts 缓存用例 + dryRun 两次第二次命中缓存用例）。
 - **已知问题**：无（原"onunload 不落盘防抖窗口内的更新"已于 2026-10-23 修复，ISS-004 已处理）。
+- **2026-11-02 变更**：dryRun 写缓存（ISS-007 已处理）。
 
 ### F-024 撤销
 - **预期行为**：移动成功入栈（含移动前完整内容与写完后的正文指纹 `writtenHash`，>2 万字只记位置）；撤销 = 校验指纹后回写内容 + 挪回原目录 + 失效两端缓存；**分流后被编辑过的笔记只挪回位置、不回写内容**（防覆盖用户改动）；上限 10 条。
-- **实现**：`main.ts:117-129`、`router.ts` undo()（返回 `UndoOutcome`）。
-- **状态**：**已验证**（router.test.ts，含"分流后再编辑→撤销不覆盖"用例）。
-- **已知问题**：`undoLast` 失败时该条已被 pop，无法重试（ISS-009）；旧数据无 `writtenHash` 的条目维持无校验回写。
+- **失败语义**：`router.undo` 返回 `UndoOutcome {ok, content, reason}`。`reason=missing`（文件已不存在）→ 丢弃该记录并明说；`reason=conflict`（原位置被同名文件占用）/ `reason=error` → **保留记录可重试**，并重新挂出撤销入口。冲突在任何写操作之前预检，失败即无副作用。
+- **实现**：`main.ts:119-131`、`router.ts` undo()。
+- **状态**：**已验证**（router.test.ts，含“分流后又编辑→撤销不覆盖”“原位置被占→conflict 且什么都没动”用例）。
+- **已知问题**：旧数据无 `writtenHash` 的条目维持无校验回写。
 - **2026-10-23 变更**：内容回写增加指纹校验；只写 frontmatter 的分流也纳入内容快照（原只有写判断块时快照）。ISS-001 已处理。
+- **2026-11-02 变更**：撤销失败按原因分流（missing 丢弃 / conflict·error 保留可重试），ISS-009 已处理。
 
 ### F-025 设置持久化与迁移
 - **预期行为**：`normalizeSettings` 把"缺失补默认、坏值退默认"，绝不改出厂常量；v0.1→v0.2 迁移：`indexFolder` 取 `inboxFolders[0]`，`moveOnJudge` 继承 `autoRouteEnabled`。
@@ -284,12 +288,12 @@ JEV Inbox Router 的长期维护依据。以**当前源码与可验证行为**�
 |---|---|---|---|
 | rules.test.ts | 42 | rules 全部 | — |
 | note-writer.test.ts | 45 | note-writer 全部 | — |
-| router.test.ts | 43 | router 流程/缓存/撤销/冲突/建议模式 | — |
+| router.test.ts | 45 | router 流程/缓存/撤销/冲突/建议模式 | — |
 | jev-client.test.ts | 26 | 客户端 | — |
 | settings-normalize.test.ts | 24 | 迁移/校验（含布尔脏值） | — |
 | presets.test.ts | 13 | 预设/remap | — |
 | i18n.test.ts | 4 | t()/快照 | — |
-| **合计** | **197** | | |
+| **合计** | **199** | | |
 | **无** | — | main.ts / modals.ts / settings-tab.ts | 纯接线/UI 层，靠手工验证（README 已声明） |
 
 ## 7. 待核实清单（不得当已验证用）
@@ -304,3 +308,4 @@ JEV Inbox Router 的长期维护依据。以**当前源码与可验证行为**�
 
 - 2026-10-23 初版：逐文件通读 src/ 12 个模块 + test/ 7 个测试文件 + README/DESIGN/UI-REVIEW 后建立；`npm run verify` 193 用例全绿作为行为基线。抽样核对：F-002/F-003 与 rules.test.ts 断言对照；F-010/F-012 与 note-writer.test.ts 对照；F-023/F-024 与 router.test.ts 对照。**main.ts 接线层行为（F-005/F-017/F-020/F-021/F-022）仅有源码证据，无自动化测试**。
 - 2026-10-23 维护批次：修复 ISS-001~006 后回写本账簿（F-005/F-007/F-023/F-024/F-025 及测试映射），`npm run verify` 197 用例全绿（含新增的撤销防覆盖、建议模式原因、布尔脏值 4 用例）。README 用例数与 F 类表述已同步。
+- 2026-11-02 收尾批次：完成 ISS-007（dryRun 写缓存）/ ISS-009（撤销失败按原因分流，冲突可重试）/ ISS-018①（移动端降级为带按钮的 Notice），回写 F-014/F-017/F-021/F-023/F-024 与测试映射，`npm run verify` 199 用例全绿。

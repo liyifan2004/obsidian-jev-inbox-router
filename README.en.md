@@ -95,7 +95,7 @@ Then enable JEV Inbox Router in Obsidian's Settings → Community plugins.
 
 | Command | Purpose |
 |---|---|
-| `npm test` | Unit tests (vitest, 197 cases) |
+| `npm test` | Unit tests (vitest, 199 cases) |
 | `npm run test:watch` | Watch mode |
 | `npm run typecheck` | `tsc --noEmit`, covering `src/` and `test/` |
 | `npm run build` | esbuild bundle to `main.js` |

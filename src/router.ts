@@ -35,10 +35,15 @@ export interface RouteOptions {
 /** 撤销时内容回写的结果 */
 export type UndoContentOutcome = "restored" | "skipped" | "none";
 
+/** 撤销失败的原因：missing=文件已找不到；conflict=原位置被占；error=其他错误 */
+export type UndoFailureReason = "missing" | "conflict" | "error";
+
 export interface UndoOutcome {
 	ok: boolean;
 	/** restored=内容已回写；skipped=笔记在分流后被改过，只挪回位置；none=没有内容快照 */
 	content: UndoContentOutcome;
+	/** ok=false 时给出原因，宿主据此决定撤销记录是保留（可重试）还是丢弃 */
+	reason?: UndoFailureReason;
 }
 
 /** 宿主（由 main.ts 提供）需要暴露的能力 */
@@ -166,10 +171,12 @@ export class InboxRouter {
 			fromCache,
 		};
 
-		if (options.dryRun) return result;
-
-		// 缓存这次判断，内容没变时下次直接复用
+		// 缓存这次判断，内容没变时下次直接复用。
+		// dryRun 也写缓存（ISS-007）：dryRun 不写任何文件内容，指纹依然有效，
+		// 否则「自动分流前确认」每改一次笔记都要重新调用 JEV，白白计费。
 		this.host.setCache(fromPath, { hash, at: Date.now(), decision });
+
+		if (options.dryRun) return result;
 
 		// ---- 判定是否允许移动 ----
 		const targetFolder = decision.targetFolder;
@@ -298,36 +305,48 @@ export class InboxRouter {
 	 *
 	 * 内容回写前先比对 writtenHash：分流之后用户又编辑过的笔记只挪回位置、
 	 * 不回写内容，避免用旧快照覆盖用户的改动。
+	 *
+	 * 失败不抛错，用 reason 区分：
+	 * - missing：文件已不存在，记录无法再用（宿主可丢弃）；
+	 * - conflict：原位置被别的文件占住，什么都没动（宿主保留记录，用户解决后可重试）；
+	 * - error：移动/回写过程出错（宿主保留记录，可重试）。
 	 */
 	async undo(entry: UndoEntry): Promise<UndoOutcome> {
 		const file = this.app.vault.getAbstractFileByPath(entry.path);
-		if (!(file instanceof TFile)) return { ok: false, content: "none" };
+		if (!(file instanceof TFile)) return { ok: false, content: "none", reason: "missing" };
 
-		let content: UndoContentOutcome = "none";
-		if (entry.previousContent !== null) {
-			let safeToRestore = true;
-			if (entry.writtenHash) {
-				try {
-					const current = await this.app.vault.read(file);
-					safeToRestore = hashContent(current) === entry.writtenHash;
-				} catch {
-					safeToRestore = false;
-				}
-			}
-			if (safeToRestore) {
-				this.host.beginSelfWrite();
-				const restored = entry.previousContent;
-				await this.app.vault.process(file, () => restored);
-				content = "restored";
-			} else {
-				content = "skipped";
-			}
+		// 冲突预检放在任何写操作之前：原位置被占就整体不动，保证「失败即无副作用」
+		if (entry.previousPath && entry.previousPath !== file.path) {
+			const occupied = this.app.vault.getAbstractFileByPath(entry.previousPath);
+			if (occupied) return { ok: false, content: "none", reason: "conflict" };
 		}
 
-		if (entry.previousPath && entry.previousPath !== file.path) {
-			const dir = entry.previousPath.split("/").slice(0, -1).join("/");
-			await this.ensureFolder(dir);
-			await this.app.fileManager.renameFile(file, normalizePath(entry.previousPath));
+		let content: UndoContentOutcome = "none";
+		try {
+			if (entry.previousContent !== null) {
+				let safeToRestore = true;
+				if (entry.writtenHash) {
+					const current = await this.app.vault.read(file);
+					safeToRestore = hashContent(current) === entry.writtenHash;
+				}
+				if (safeToRestore) {
+					this.host.beginSelfWrite();
+					const restored = entry.previousContent;
+					await this.app.vault.process(file, () => restored);
+					content = "restored";
+				} else {
+					content = "skipped";
+				}
+			}
+
+			if (entry.previousPath && entry.previousPath !== file.path) {
+				const dir = entry.previousPath.split("/").slice(0, -1).join("/");
+				await this.ensureFolder(dir);
+				await this.app.fileManager.renameFile(file, normalizePath(entry.previousPath));
+			}
+		} catch {
+			// 保持记录可重试：内容/位置可能已部分还原，但 writtenHash 校验保证重试不覆盖用户改动
+			return { ok: false, content, reason: "error" };
 		}
 
 		this.host.invalidateCache(entry.path);

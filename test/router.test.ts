@@ -427,7 +427,7 @@ describe("route：同名冲突与 dryRun", () => {
 		expect(result.toPath).toBe("要做的事/随手记 2.md");
 	});
 
-	it("dryRun 不写文件、不移动、不写缓存", async () => {
+	it("dryRun 不写文件、不移动，但会写判断缓存（ISS-007）", async () => {
 		const { vault, host, router } = setup({});
 		const before = vault.text("Inbox/随手记.md");
 		const file = vault.getAbstractFileByPath("Inbox/随手记.md")!;
@@ -438,8 +438,21 @@ describe("route：同名冲突与 dryRun", () => {
 		expect(result.decision.categoryKey).toBe("D");
 		expect(vault.text("Inbox/随手记.md")).toBe(before);
 		expect(vault.renameLog).toHaveLength(0);
-		expect(host.cache.size).toBe(0);
+		// dryRun 不改任何文件内容，正文指纹依然有效，缓存可安全写入
+		expect(host.cache.size).toBe(1);
 		expect(host.undos).toHaveLength(0);
+	});
+
+	it("dryRun 连续两次，第二次命中缓存不再调用 JEV（ISS-007）", async () => {
+		const { vault, host, router, captured } = setup({});
+		const file = vault.getAbstractFileByPath("Inbox/随手记.md")!;
+
+		const first = await router.route(file as never, { dryRun: true });
+		const second = await router.route(file as never, { dryRun: true });
+
+		expect(first.fromCache).toBe(false);
+		expect(second.fromCache).toBe(true);
+		expect(captured.length).toBe(1);
 	});
 
 	it("建议模式（allowMove:false）不动文件，并在判断块写明未移动的原因", async () => {
@@ -497,7 +510,32 @@ describe("undo", () => {
 			at: Date.now(),
 		});
 		expect(outcome.ok).toBe(false);
+		expect(outcome.reason).toBe("missing");
 		expect(host.undos).toHaveLength(0);
+	});
+
+	it("原位置被同名文件占住时返回 conflict，且什么都没动（ISS-009）", async () => {
+		const { vault, router } = setup({});
+		const file = vault.getAbstractFileByPath("Inbox/随手记.md")!;
+		await router.route(file as never);
+
+		const renamesBefore = vault.renameLog.length;
+		// 有人在原位置放了一个同名文件
+		vault.addFile("Inbox/随手记.md", "挡路的文件");
+
+		const outcome = await router.undo({
+			path: "要做的事/随手记.md",
+			previousPath: "Inbox/随手记.md",
+			previousContent: "原内容",
+			at: Date.now(),
+		});
+
+		expect(outcome.ok).toBe(false);
+		expect(outcome.reason).toBe("conflict");
+		// 失败即无副作用：没挪回、没回写内容
+		expect(vault.renameLog.length).toBe(renamesBefore);
+		expect(vault.text("要做的事/随手记.md")).not.toContain("原内容");
+		expect(vault.text("Inbox/随手记.md")).toBe("挡路的文件");
 	});
 
 	it("撤销会清掉新旧两个路径的缓存", async () => {

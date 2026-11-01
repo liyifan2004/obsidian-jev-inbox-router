@@ -1,4 +1,4 @@
-import { Menu, Notice, Plugin, TFile } from "obsidian";
+import { Menu, Notice, Platform, Plugin, TFile } from "obsidian";
 import { DEFAULT_SETTINGS } from "./constants";
 import { t } from "./i18n";
 import { JevClient, JevError } from "./jev-client";
@@ -32,9 +32,13 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 	/** 独立的撤销状态栏项：只在「刚刚成功移动过文件」后的窗口内存在 */
 	private undoStatusEl: HTMLElement | null = null;
 	private undoStatusTimer: number | null = null;
+	/** 移动端的撤销入口：状态栏不可用，降级为带按钮的 Notice */
+	private mobileUndoNotice: Notice | null = null;
 	/** 独立的「接受」状态栏项：只在「刚给出建议且未处理」的窗口内存在 */
 	private acceptStatusEl: HTMLElement | null = null;
 	private acceptStatusTimer: number | null = null;
+	/** 移动端的接受入口：状态栏不可用，降级为带按钮的 Notice */
+	private mobileAcceptNotice: Notice | null = null;
 	/** 最近一条未处理建议：状态栏「接受」与 accept-last-suggestion 命令都用它 */
 	private lastSuggestion: { decision: RouterDecision; file: TFile } | null = null;
 	private cacheMap = new Map<string, CacheEntry>();
@@ -181,8 +185,16 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 
 	// ---------------------------------------------------------------- 状态栏
 
+	/**
+	 * 移动端降级开关：官方明确 addStatusBarItem 在移动端不可用（obsidian.d.ts:
+	 * "Not available on mobile."），此时「接受/撤销」入口降级为带按钮的通知。
+	 */
+	private get useMobileFallback(): boolean {
+		return this.settings.statusBarEnabled && Platform.isMobileApp;
+	}
+
 	private setupStatusBar(): void {
-		if (this.settings.statusBarEnabled) {
+		if (this.settings.statusBarEnabled && !Platform.isMobileApp) {
 			if (!this.statusEl) {
 				this.statusEl = this.addStatusBarItem();
 				this.statusEl.addClass("jev-status");
@@ -240,8 +252,19 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 	}
 
 	/** 成功移动后在 statusBarClearMs 窗口内提供独立的「撤销」入口 */
-	private showUndoStatus(): void {
+	private showUndoStatus(folder = ""): void {
 		if (!this.settings.statusBarEnabled) return;
+
+		// 移动端没有状态栏：降级为带「撤销」按钮的通知
+		if (this.useMobileFallback) {
+			this.showMobileActionNotice({
+				kind: "undo",
+				message: t("noticeMobileUndoText", { folder: folder || t("vaultRoot") }),
+				label: t("noticeMobileUndoLabel"),
+				onAction: () => void this.undoLast(),
+			});
+			return;
+		}
 
 		if (!this.undoStatusEl) {
 			const el = this.addStatusBarItem();
@@ -275,14 +298,32 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			this.undoStatusEl.detach();
 			this.undoStatusEl = null;
 		}
+		if (this.mobileUndoNotice) {
+			this.mobileUndoNotice.hide();
+			this.mobileUndoNotice = null;
+		}
 	}
 
 	/**
 	 * 建议模式下：在 statusBarClearMs 窗口内提供独立的「接受」入口。
 	 * 与撤销项同一套模式：创建/显示/detach/置 null，不允许节点残留。
 	 */
-	private showAcceptStatus(ariaLabel: string): void {
+	private showAcceptStatus(ariaLabel: string, folder = "", name = ""): void {
 		if (!this.settings.statusBarEnabled) return;
+
+		// 移动端没有状态栏：降级为带「接受」按钮的通知
+		if (this.useMobileFallback) {
+			this.showMobileActionNotice({
+				kind: "accept",
+				message: t("noticeMobileAcceptText", {
+					name: name || t("vaultRoot"),
+					folder: folder || t("vaultRoot"),
+				}),
+				label: t("noticeMobileAcceptLabel"),
+				onAction: () => void this.acceptSuggestion(),
+			});
+			return;
+		}
 
 		if (!this.acceptStatusEl) {
 			const el = this.addStatusBarItem();
@@ -315,6 +356,48 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		if (this.acceptStatusEl) {
 			this.acceptStatusEl.detach();
 			this.acceptStatusEl = null;
+		}
+		if (this.mobileAcceptNotice) {
+			this.mobileAcceptNotice.hide();
+			this.mobileAcceptNotice = null;
+		}
+	}
+
+	/**
+	 * 移动端降级入口：一个带按钮的常驻通知。
+	 *
+	 * 只用标准 DOM + `new Notice(DocumentFragment)`——两者在 minAppVersion 1.5.0
+	 * 都可用（`Notice` 构造签名自 0.9.7 起就接受 DocumentFragment），
+	 * 不用 `messageEl`（1.8.7+）也不用 Obsidian 的 `createFragment` 全局函数。
+	 */
+	private showMobileActionNotice(options: {
+		kind: "undo" | "accept";
+		message: string;
+		label: string;
+		onAction: () => void;
+	}): void {
+		// 只保留一个：新的覆盖旧的
+		this.hideUndoStatus();
+		this.hideAcceptStatus();
+
+		const fragment = document.createDocumentFragment();
+		const text = document.createElement("span");
+		text.textContent = options.message;
+		const button = document.createElement("button");
+		button.className = "mod-cta";
+		button.textContent = options.label;
+		button.addEventListener("click", () => {
+			options.onAction();
+		});
+		fragment.appendChild(text);
+		fragment.appendChild(button);
+
+		const windowMs = this.settings.statusBarClearMs > 0 ? this.settings.statusBarClearMs : 12000;
+		const notice = new Notice(fragment, windowMs);
+		if (options.kind === "undo") {
+			this.mobileUndoNotice = notice;
+		} else {
+			this.mobileAcceptNotice = notice;
 		}
 	}
 
@@ -622,7 +705,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		});
 		this.setStatus(view.kind, view.text, view.color);
 		// 自动分流（quiet）也要有就地退路：先挂上撤销入口，再决定是否发通知
-		if (result.moved) this.showUndoStatus();
+		if (result.moved) this.showUndoStatus(d.targetFolder);
 
 		if (options.quiet) return;
 
@@ -663,7 +746,11 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		this.setStatus(view.kind, view.text, view.color);
 		if (file) {
 			this.lastSuggestion = { decision: d, file };
-			this.showAcceptStatus(t("ariaAccept", { folder: d.targetFolder || t("vaultRoot") }));
+			this.showAcceptStatus(
+				t("ariaAccept", { folder: d.targetFolder || t("vaultRoot") }),
+				d.targetFolder,
+				file.basename
+			);
 		}
 	}
 
@@ -706,7 +793,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 			if (result.moved) {
 				this.pushUndo({ path: target, previousPath: fromPath, previousContent: null, at: Date.now() });
 				this.setStatus("ok", t("statusMovedTo", { folder: folder || t("vaultRoot") }));
-				this.showUndoStatus();
+				this.showUndoStatus(folder);
 				if (!quiet) new Notice(t("noticeMovedTo", { folder: folder || t("vaultRoot") }));
 			} else {
 				this.setStatus("ready", t("statusAlreadyAtTarget"));
@@ -813,7 +900,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 	// ---------------------------------------------------------------- 撤销
 
 	private async undoLast(): Promise<void> {
-		const entry = this.undoStack.pop();
+		const entry = this.undoStack[this.undoStack.length - 1];
 		if (!entry) {
 			new Notice(t("noticeNothingToUndo"), 6000);
 			return;
@@ -821,6 +908,7 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 		this.suppressUntil = Date.now() + 4000;
 		const outcome = await this.router.undo(entry);
 		if (outcome.ok) {
+			this.undoStack.pop();
 			new Notice(
 				outcome.content === "skipped"
 					? t("noticeUndoneKeptEdits", { path: entry.path, previousPath: entry.previousPath })
@@ -828,12 +916,29 @@ export default class JevInboxRouterPlugin extends Plugin implements RouterHost {
 				6000
 			);
 			this.setStatus("ok", t("statusUndone"));
-		} else {
+			this.hideUndoStatus();
+		} else if (outcome.reason === "missing") {
+			// 文件都没了，这条记录无法再撤销，丢弃并明说
+			this.undoStack.pop();
 			new Notice(t("noticeUndoFailed", { path: entry.path }), 8000);
 			this.setStatus("error", t("statusUndoFailed"));
+			this.hideUndoStatus();
+		} else {
+			// conflict / error：记录保留在栈里，用户处理完可以再次撤销（ISS-009）。
+			// 这时重新挂出撤销入口，让用户不必去翻命令面板。
+			new Notice(
+				t("noticeUndoRetry", {
+					path: entry.path,
+					reason:
+						outcome.reason === "conflict"
+							? t("noticeUndoRetryConflict")
+							: t("noticeUndoRetryError"),
+				}),
+				8000
+			);
+			this.setStatus("error", t("statusUndoFailed"));
+			this.showUndoStatus();
 		}
-		// 无论成败都立刻收起撤销入口，不依赖 12s 定时器回收
-		this.hideUndoStatus();
 		void this.persist();
 	}
 

@@ -93,7 +93,7 @@ npm run sync          # 复制到默认 vault 的 plugins 目录
 
 | 命令 | 作用 |
 |---|---|
-| `npm test` | 跑单元测试（vitest，197 个用例） |
+| `npm test` | 跑单元测试（vitest，199 个用例） |
 | `npm run test:watch` | 监听模式 |
 | `npm run typecheck` | `tsc --noEmit`，覆盖 `src/` 与 `test/` |
 | `npm run build` | esbuild 打包成 `main.js` |
