@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-jev-inbox-router",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Obsidian plugin: route incoming notes to the right folder using JEV (TypeSafe System One) typed decisions.",
 	"main": "main.js",
 	"scripts": {
@@ -10,6 +10,7 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"verify": "npm run typecheck && npm run test && npm run build",
+		"version": "node version-bump.mjs && git add manifest.json versions.json package.json",
 		"sync": "node scripts/sync-to-vault.mjs"
 	},
 	"keywords": [
