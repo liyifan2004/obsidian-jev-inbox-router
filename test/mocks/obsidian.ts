@@ -254,6 +254,17 @@ export class SuggestModal<T> extends Modal {
  * 设置页会 createEl / createDiv / createSpan / setAttribute / addClass ……
  * 全部都要有，否则测试会因为桩不完整而失败 ——
  * 那种失败是**桩的问题**，不是被测代码的问题。
+ *
+ * ## 为什么它要跟踪子节点
+ *
+ * Obsidian 的 `Setting` 结构是 `settingEl > (infoEl, controlEl)`。
+ * `settingEl.empty()` 会把子节点一起清掉 —— 之后往 `controlEl` 画的内容
+ * **不会出现在页面上**。
+ *
+ * 这种「容器已脱离 DOM」的错误在纯方法级 mock 里查不出来
+ * （每个属性都是独立对象，互相不知道关系）。
+ * 所以这里让 `empty()` 真的把子节点标记为「已清空」，
+ * 让测试能断言「内容画进了还活着的容器」。
  */
 export function makeStubElement(): HTMLElement {
 	const el: Record<string, unknown> = {
@@ -267,7 +278,13 @@ export function makeStubElement(): HTMLElement {
 		appendChild: () => el,
 		remove: () => undefined,
 		detach: () => undefined,
-		empty: () => undefined,
+		empty: () => {
+			// 清空自己：子节点一并失效（模拟真实 DOM 的 empty() 语义）
+			for (const child of el.__children as unknown[]) {
+				(child as { __detached?: boolean }).__detached = true;
+			}
+			(el.__children as unknown[]).length = 0;
+		},
 		querySelector: () => null,
 		querySelectorAll: () => [],
 		addEventListener: () => undefined,
@@ -278,6 +295,10 @@ export function makeStubElement(): HTMLElement {
 			removeProperty: () => undefined,
 			getPropertyValue: () => "",
 		},
+		/** 子节点列表（测试用来判断某容器是否已被清空） */
+		__children: [] as unknown[],
+		/** 是否已被 empty() 脱离 */
+		__detached: false,
 	};
 	el.createEl = () => makeStubElement();
 	el.createDiv = () => makeStubElement();
@@ -308,15 +329,31 @@ export class Setting {
 	extraButtons = 0;
 	/** 按钮的文案与回调。 */
 	buttons: { text: string; onClick: () => unknown }[] = [];
-	/** extraSettingsEl —— addOverflowButton 用它定位菜单、挂 aria-label。 */
+	/** extraSettingsEl —— addOverflowButton 用它定位菜单。 */
 	extraSettingsEl: HTMLElement = makeStubElement();
-	/** controlEl —— 自定义块用它当容器。 */
+	/**
+	 * controlEl —— 自定义块用它当容器。
+	 *
+	 * **真实结构**：`controlEl` 是 `settingEl` 的**子节点**。
+	 * 所以 `settingEl.empty()` 会把它一起清掉（内容脱离 DOM）——
+	 * 这是 mock 必须模拟出来的关系，否则测不出
+	 * 「empty 整个 settingEl 后往 controlEl 画的内容不显示」这类缺陷。
+	 */
 	controlEl: HTMLElement = makeStubElement();
-	/** settingEl —— 自定义块用它清空整行。 */
+	/** infoEl —— 名称与描述的容器。自定义块清它来去掉默认文案。 */
+	infoEl: HTMLElement = makeStubElement();
+	/** settingEl —— 整行的容器。 */
 	settingEl: HTMLElement = makeStubElement();
 
 	constructor(public el: unknown) {
 		__createdSettings.push(this);
+		// 模拟真实的父子结构：controlEl / infoEl 是 settingEl 的子节点。
+		// 这样 `settingEl.empty()` 之后往 controlEl 画的内容会被标记为脱离，
+		// 测试才能查出「画进了已失效的容器」这类缺陷。
+		const children = (this.settingEl as unknown as { __children?: unknown[] }).__children;
+		if (children) {
+			children.push(this.infoEl, this.controlEl);
+		}
 	}
 
 	setName(name?: string): this {

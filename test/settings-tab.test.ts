@@ -144,6 +144,34 @@ describe("设置页双轨一致性", () => {
 		expect(checked).toBeGreaterThan(0);
 	});
 
+	it("自定义块的内容画进的是还活着的容器", () => {
+		// Obsidian 的 Setting 结构是 `settingEl > (infoEl, controlEl)`。
+		// 如果实现里调用 `setting.settingEl.empty()`，controlEl 会被一起清掉
+		// （脱离 DOM）—— 之后往 controlEl 画的内容**不会出现在页面上**。
+		//
+		// 这类错误在「每个属性都是独立对象」的朴素 mock 里查不出来，
+		// 所以这里显式断言容器没被脱离。
+		const plugin = makePlugin(deepCopy(DEFAULT_SETTINGS));
+		const tab = makeTab(plugin);
+
+		const groups = tab.getSettingDefinitions() as {
+			items: { name?: string; render?: (setting: Setting) => unknown }[];
+		}[];
+
+		let checked = 0;
+		for (const group of groups) {
+			for (const item of group.items) {
+				if (!item.render) continue;
+				const setting = new Setting(makeEl());
+				item.render(setting);
+				const control = setting.controlEl as unknown as { __detached?: boolean };
+				expect(control.__detached).not.toBe(true);
+				checked += 1;
+			}
+		}
+		expect(checked).toBeGreaterThan(0);
+	});
+
 	it("命令式路径与声明式路径产出的行名称集合一致", () => {
 		const plugin = makePlugin(deepCopy(DEFAULT_SETTINGS));
 		const tab = makeTab(plugin);

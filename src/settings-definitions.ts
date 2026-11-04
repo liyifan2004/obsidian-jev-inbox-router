@@ -134,9 +134,15 @@ export function createImperativeSink(root: HTMLElement): RowSink {
 			// （之前这里是直接 build(root)，结果两条路径的行数不同：
 			//  声明式多出一行、命令式没有。行数不一致会让「两条路径等价」
 			//  这个不变量没法被断言守住。）
+			//
+			// **只清 infoEl，不清 settingEl**：
+			// Obsidian 的 Setting 结构是 `settingEl > (infoEl, controlEl)` ——
+			// empty() 整个 settingEl 会把 controlEl 一起清掉（它已被移除），
+			// 之后往 controlEl 里画的内容**不会出现在页面上**。
+			// 清 infoEl 只是去掉默认的名称/描述，controlEl 仍是活的容器。
 			const setting = new Setting(root).setName(name);
-			setting.settingEl.empty();
-			setting.settingEl.addClass("jev-custom-block");
+			setting.infoEl.empty();
+			setting.controlEl.addClass("jev-custom-block");
 			build(setting.controlEl);
 		},
 	};
@@ -193,10 +199,13 @@ export function createDeclarativeSink(): RowSink & {
 				name,
 				searchable: false,
 				render: (setting: Setting) => {
-					// 自定义块要占满整行：先清掉 Setting 自带的名字/描述，
-					// 再把容器撑满。
-					setting.settingEl.empty();
-					setting.settingEl.addClass("jev-custom-block");
+					// 自定义块要占满整行。
+					// **只清 infoEl，不清 settingEl** —— 见 createImperativeSink 里的说明：
+					// Obsidian 的 Setting 结构是 `settingEl > (infoEl, controlEl)`，
+					// empty() 整个 settingEl 会连 controlEl 一起清掉，
+					// 之后画进 controlEl 的内容**不会出现在页面上**。
+					setting.infoEl.empty();
+					setting.controlEl.addClass("jev-custom-block");
 					build(setting.controlEl);
 				},
 			});

@@ -64,6 +64,36 @@
 - `src/main.ts` 是接线层，vitest 无 jsdom 环境，接受/撤销的移动端分支**无自动化测试**。
 - ISS-018 的 README 移动端说明与自测清单仍未补；ISS-019/020 未动。
 
+### 补充修正（同日第二轮）：自定义块画进了已脱离 DOM 的容器
+
+**缺陷**：`src/settings-definitions.ts` 的自定义块（分类卡片列表 / 预设列表）
+在两条渲染路径里都调用了 `setting.settingEl.empty()`。
+
+但 Obsidian 的 `Setting` 结构是 **`settingEl > (infoEl, controlEl)`** ——
+`empty()` 整个 `settingEl` 会把 `controlEl` **一起清掉**（它已被移出 DOM）。
+之后往 `controlEl` 里画的内容**不会出现在页面上**：
+分类卡片列表与预设列表在真实 Obsidian 里会是空白。
+
+**为什么测试没抓到**：`test/mocks/obsidian.ts` 的 `Setting` 桩里
+`settingEl` / `controlEl` / `infoEl` 是三个**互相独立**的对象 ——
+`empty()` 不会影响另外两个。这种 mock 查不出「容器已脱离」的错误。
+
+**修法**：
+1. 改成 `setting.infoEl.empty()` —— 只去掉默认的名称/描述，
+   `controlEl` 仍是活的容器；并把 `jev-custom-block` 类加在 `controlEl` 上。
+2. **让 mock 模拟真实的父子关系**：`makeStubElement()` 跟踪子节点，
+   `empty()` 把子节点标记为 `__detached`；`Setting` 构造时把
+   `infoEl` / `controlEl` 注册为 `settingEl` 的子节点。
+3. 新增用例「自定义块的内容画进的是还活着的容器」。
+
+**反证**：把实现改回 `setting.settingEl.empty()` → 新用例当场失败；
+恢复后 14/14 通过。
+
+**教训**：**mock 必须模拟真实的对象关系**，不只是「方法齐全」。
+每个属性都是独立对象时，「A 被清空导致 B 失效」这类缺陷天然查不出来。
+
+**测试**：`npm run verify` 全绿；228 → 229 用例。
+
 ---
 
 ## 2026-11-05 · 商店审查自查接入 + 设置页双轨重构（ISS-026~032）
