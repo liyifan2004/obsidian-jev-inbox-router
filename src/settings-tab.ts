@@ -487,7 +487,14 @@ export class JevSettingTab extends PluginSettingTab {
 		});
 
 		const dot = head.createSpan({ cls: "jev-dot jev-ink" });
-		dot.style.setProperty("--jev-cat", cat.color);
+		// 禁用态不写 inline --jev-cat，让它回落到 :root 的中性默认色。
+		// 之前是在 CSS 里用 `--jev-cat: var(--text-faint) !important` 覆盖
+		// inline 值 —— inline style 的优先级高于任何样式表规则，不用
+		// !important 根本覆盖不掉；而 !important 又会被 Obsidian 商店审查
+		// 警告。移除 inline 属性是唯一干净的做法（inline 优先级最低）。
+		if (cat.enabled) {
+			dot.style.setProperty("--jev-cat", cat.color);
+		}
 
 		const keyEl = head.createSpan({ cls: "jev-cat-key", text: cat.key });
 		keyEl.setAttribute("title", t("catKeyTooltip"));
@@ -531,6 +538,13 @@ export class JevSettingTab extends PluginSettingTab {
 			cat.enabled = toggle.checked;
 			// 只切换禁用类，避免重渲染导致焦点丢失；颜色由 CSS 接管
 			card.toggleClass("is-disabled", !cat.enabled);
+			// 启用时补回 inline 颜色，禁用时移除让它回落到中性默认色
+			// （CSS 侧无法用普通规则覆盖 inline style —— 见上面创建 dot 处的注释）
+			if (cat.enabled) {
+				dot.style.setProperty("--jev-cat", cat.color);
+			} else {
+				dot.style.removeProperty("--jev-cat");
+			}
 			await this.commit();
 		});
 		head.createEl("label", { cls: "jev-toggle-label", text: t("enable"), attr: { for: toggleId } });
@@ -597,7 +611,11 @@ export class JevSettingTab extends PluginSettingTab {
 				t.inputEl.addClass("jev-color-input");
 				t.setValue(cat.color).onChange(async (v) => {
 					cat.color = v;
-					dot.style.setProperty("--jev-cat", v);
+					// 禁用时不要写 inline --jev-cat ——
+					// 否则会绕过禁用态的灰色（那条 CSS 规则只在没有 inline 值时生效）
+					if (cat.enabled) {
+						dot.style.setProperty("--jev-cat", v);
+					}
 					hexEl?.setText(v.toUpperCase());
 					await this.commit();
 				});

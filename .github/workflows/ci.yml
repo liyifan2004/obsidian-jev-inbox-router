@@ -36,6 +36,14 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # CSS lint —— 与 Obsidian 商店审查同一份规则集。
+      #
+      # 本插件已在社区商店列表里。把 stylelint-config-obsidianmd 接进 CI，
+      # !important 与 :has() 这两类问题会在**提交时**被拦下，
+      # 而不是等发版后被商店审查打回、从列表里下架。
+      - name: CSS lint
+        run: npm run lint:styles
+
       - name: Tests
         run: npm run test
 

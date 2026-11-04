@@ -172,6 +172,7 @@ body.is-mobile .jev-status .jev-hint {
 	/* 中性兜底；callout 颜色不再等于任何分类色，避免把「标识」误用成「主题色」 */
 	--callout-color: var(--jev-callout-rgb, 127, 140, 153);
 	--callout-icon: lucide-inbox;
+
 	font-size: var(--font-ui-smaller);
 }
 
@@ -601,9 +602,21 @@ details.jev-route-block li {
 	color: var(--text-muted);
 }
 
-/* 标识点转中性灰；inline --jev-cat 用 !important 覆盖 */
+/*
+ * 标识点转中性灰。
+ *
+ * 之前是 `--jev-cat: var(--text-faint) !important` —— inline style 的优先级
+ * 高于任何样式表规则，不用 !important 覆盖不掉，而 !important 会被
+ * Obsidian 商店审查警告。
+ *
+ * 现在改成「禁用时不写 inline --jev-cat」（见 settings-tab.ts）：
+ *   启用 → inline 写分类色，inline 优先级最高，一定生效；
+ *   禁用 → 不写 inline，这条规则生效，元素自己的声明也胜过
+ *          从 :root 继承来的默认值 #7f8c99。
+ * 两边都不需要 !important。
+ */
 .jev-cat-card.is-disabled .jev-dot.jev-ink {
-	--jev-cat: var(--text-faint) !important;
+	--jev-cat: var(--text-faint);
 }
 
 .jev-color-input {
