@@ -137,6 +137,57 @@
 
 ---
 
+## ISS-026（P1，确认缺陷）eslint 配置写了但从未执行
+- **证据**：`eslint.config.mjs` 存在于仓库，`eslint-plugin-obsidianmd` 已装在 devDependencies，但 `package.json` 的 `verify` 脚本里没有 lint 步骤，`.github/workflows/ci.yml` 里也没有 lint 步骤 —— **配置写了、规则装了，就是没人跑**。
+- **影响**：商店审查用的规则集就在本地，却要等发版后被商店打回才发现问题。同 fleet 的 obsidian-media-speed-enhancer 1.0.42 因此被下架（设置标题含插件名）。本插件当时同样存在同类问题：`createEl("h2", {text: "JEV Inbox Router"})` 既是 `no-manual-html-headings` 的 error，也重复了插件名。
+- **方案**：新增 `npm run lint` 并接进 `verify` 与 `ci.yml`；按规则逐项修代码（见 ISS-027~032）。
+- **验收**：`npm run verify` 全绿且 lint 0 error；CI 里能看到独立的 Lint 步骤。
+- **状态**：已处理（2026-11-05）
+
+## ISS-027（P1，确认缺陷）设置页没有实现 getSettingDefinitions()
+- **证据**：`src/settings-tab.ts` 只有命令式的 `display()`；官方规则 `settings-tab/prefer-setting-definitions` 报 warning（商店审查列为 Warning 项）。
+- **影响**：1.13+ 的用户在 Obsidian 设置搜索里**搜不到本插件的任何设置项**；商店审查也会因此记一条 Warning。
+- **方案**：实现 `getSettingDefinitions()`，`display()` 降为 1.13 以下（minAppVersion 1.5.0）的 fallback。为避免两份 UI 漂移，新增 `src/settings-definitions.ts` 的 RowSink 抽象：设置页每节写成「往 sink 加行」，两条路径共用同一批节实现。
+- **验收**：新增 `test/settings-tab.test.ts` 断言两条路径产出的行名集合、分组标题集合、每行控件类型三者一致；反证（删掉一整节 / 让一行不挂控件）能使测试失败。
+- **状态**：已处理（2026-11-05）
+
+## ISS-028（P2，确认缺陷）设置页用 createEl("h2"/"h3") 造分组标题
+- **证据**：`src/settings-tab.ts` 有 8 处 `root.createEl("h2"/"h3", ...)`；官方规则 `settings-tab/no-manual-html-headings` 是 **error** 级。
+- **影响**：商店审查同类项，可能被打回。
+- **方案**：改用 `new Setting(root).setName(...).setHeading()`；标题文案统一走 `sectionHeading()`，且**不含插件名**（`"JEV Inbox Router"` → 各节功能名）。
+- **验收**：lint 中该规则 0 报告；新增测试断言所有分组标题不含 `settings`/`options`/`general`/插件名。
+- **状态**：已处理（2026-11-05）
+
+## ISS-029（P2，技术债）display() 被官方标记 deprecated，但官方规则又要求保留它
+- **证据**：`obsidian` 1.13+ 的 d.ts 把 `SettingTab.display()` 标了 `@deprecated`；官方规则 `settings-tab/require-display` 在 minAppVersion < 1.13.0 时**要求**必须有 `display()`（本插件 minAppVersion 是 1.5.0）。同时 `eslint-comments/no-restricted-disable` 禁止用屏蔽注释压掉 `@typescript-eslint/no-deprecated`。
+- **影响**：两条官方规则叠加后，「保留 display()」与「不报 deprecated」直接冲突 —— 19 个 warning 的来源。
+- **方案**：把命令式渲染体抽到私有方法 `renderImperative()`，`display()` 只做转发；刷新路径改调私有方法，`this.display()` 的调用点全部消失。同 fleet 的 obsidian-folio 已是这个形态。
+- **验收**：lint 中 `@typescript-eslint/no-deprecated` 只剩 0 条源码告警（测试文件按规则豁免）。
+- **状态**：已处理（2026-11-05）
+
+## ISS-030（P2，技术债）JSON.parse(JSON.stringify(x)) 深拷贝丢失类型安全
+- **证据**：`src/settings-tab.ts` 有 5 处 `JSON.parse(JSON.stringify(...))`；`JSON.parse` 返回 `any`，触发 5 个 `no-unsafe-assignment` + 1 个 `no-unsafe-return`。
+- **影响**：类型安全丢失；且 JSON 往返会**丢掉值为 `undefined` 的键**（`JSON.stringify` 会把它整个省略）。
+- **方案**：新增类型安全的 `deepCopy<T>()`（递归拷贝，保留 `undefined`），放在 `src/settings-definitions.ts`。
+- **验收**：lint 相关规则 0 报告；新增 3 个用例（不共享引用 / 保留 undefined / 嵌套拷贝）。
+- **状态**：已处理（2026-11-05）
+
+## ISS-031（P3，低风险）builtin-modules 依赖可换成 Node 内置 API
+- **证据**：`esbuild.config.mjs` 引入 `builtin-modules` 列出 Node 内置模块给 esbuild external；官方依赖规则 `depend/ban-dependencies` 建议替换（error 级）。
+- **影响**：多一个第三方依赖（构建期，不进产物）；且 `builtin-modules` 只有 41 个模块，而 `node:module` 的 `builtinModules` 有 68 个。
+- **方案**：改用 `import { builtinModules } from "node:module"`，移除该依赖。两者行为一致（都不带 `node:` 前缀），已实测。
+- **验收**：构建通过且产物逐字节不变；`npm audit` 无新增项。
+- **状态**：已处理（2026-11-05）
+
+## ISS-032（P2，测试缺口）设置页与接线层零自动化测试
+- **证据**：账簿「本轮不做」一节写着「main.ts/modals/settings-tab 无单测 —— 纯接线与 UI 层，现有 vitest 无 jsdom 环境，引 e2e 成本高」。
+- **影响**：双轨改造（ISS-027）动的是设置页的全部渲染逻辑，**零测试保护** —— 而这类缺陷在 Obsidian 里不会报错，只表现为「少了一项设置」。
+- **方案**：不引 jsdom，而是把 `test/mocks/obsidian.ts` 的 `Setting` 桩升级为**记录名字与挂载的控件**，配合 `__createdSettings` 导出，断言两条渲染路径的产出完全一致。
+- **验收**：13 个新用例；3 次反证全部成功（删节 / 不挂控件 / render 返回 Setting 对象）。
+- **状态**：已处理（2026-11-05）
+
+---
+
 ## 2026-10-23 批次的实施与验证记录
 
 已处理 ISS-001 ~ ISS-006，改动集中在：`src/types.ts`、`src/router.ts`、`src/main.ts`、`src/settings-normalize.ts`、`src/i18n.ts`、`test/router.test.ts`、`test/settings-normalize.test.ts`、`README.md`、`README.en.md`。

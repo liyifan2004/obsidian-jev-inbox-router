@@ -444,7 +444,7 @@ describe("route：同名冲突与 dryRun", () => {
 	});
 
 	it("dryRun 连续两次，第二次命中缓存不再调用 JEV（ISS-007）", async () => {
-		const { vault, host, router, captured } = setup({});
+		const { vault, router, captured } = setup({});
 		const file = vault.getAbstractFileByPath("Inbox/随手记.md")!;
 
 		const first = await router.route(file as never, { dryRun: true });

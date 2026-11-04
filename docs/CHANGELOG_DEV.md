@@ -63,3 +63,43 @@
 - 全部改动**未在真实 Obsidian 中加载验证**（无 GUI 环境）。移动端降级路径尤其需要真机确认（模拟器或真机 Obsidian）。
 - `src/main.ts` 是接线层，vitest 无 jsdom 环境，接受/撤销的移动端分支**无自动化测试**。
 - ISS-018 的 README 移动端说明与自测清单仍未补；ISS-019/020 未动。
+
+---
+
+## 2026-11-05 · 商店审查自查接入 + 设置页双轨重构（ISS-026~032）
+
+**背景**：本插件已在 Obsidian 社区商店列表里。上一轮（MSE 1.0.42）发现商店审查用的规则集是**公开且可本地运行**的 —— `eslint-plugin-obsidianmd`（TS 源码）+ `stylelint-config-obsidianmd`（CSS）。本轮把 eslint 那一半接进来，并按它的规则改代码。
+
+**完成内容**：
+
+1. **接入 eslint（ISS-019）**：`eslint.config.mjs` 已存在但**从未接进 verify 或 CI** —— 配置写了、规则装了，就是没人跑。新增 `npm run lint` 并接进 `verify` 与 `ci.yml`。
+   首次运行暴露 **25 个 error**：其中 8 个是 `settings-tab/no-manual-html-headings`（商店审查同类项，error 级）、1 个 `settings-tab/prefer-setting-definitions`（商店审查列为 Warning）、其余是 TS 严格性问题。
+2. **设置页双轨重构（ISS-020）**：实现 `getSettingDefinitions()`，把 `display()` 降为 1.13 以下（minAppVersion 1.5.0）的 fallback。
+   - 新增 `src/settings-definitions.ts`：定义 **RowSink** 抽象 —— 设置页每一节都写成「往 sink 里加行」，声明式 sink 收集成定义数组、命令式 sink 画成 DOM。**两条路径跑的是同一批节实现**，结构上不可能漂移。
+   - 分组标题从 `createEl("h2"/"h3")` 改为 `setHeading()`，并**去掉重复插件名的标题**（`"JEV Inbox Router"` → 各节功能名）—— 前者违反官方规则，后者是 MSE 1.0.42 被下架的直接原因。
+   - 刷新路径分流：1.13+ 用 `update()`（声明式树由框架持有，重调 `display()` 无效），旧版重跑命令式渲染。
+3. **消除 19 个 deprecated 警告**：核心是 `display()` 在 1.13+ 的类型定义里标了 `@deprecated`，而官方 eslint 禁止用屏蔽注释压掉它（`eslint-comments/no-restricted-disable`）。
+   解法与同 fleet 的 obsidian-folio 一致：**把命令式渲染体抽到私有方法 `renderImperative()`，`display()` 只做转发**，于是 `this.display()` 的调用点全部消失。
+   另：删掉 3 处 `setDynamicTooltip()`（该 API 已无实际作用）；`setWarning()` 按版本分流（1.13+ 用 `setDestructive()`，旧版用索引访问调用旧 API）。
+4. **其余 14 个 error 逐项清理**：`JSON.parse(JSON.stringify(x))` → 类型安全的 `deepCopy()`（顺带解决 `no-unsafe-assignment` 与 JSON 往返丢 `undefined` 的问题）；`super.onOpen()` → `await super.onOpen()`（基类签名是 `Promise<void> | void`）；DOM 事件监听器里的 async 回调 → `void` 显式标注；移除 `builtin-modules` 依赖（改用 Node 内置的 `node:module` 的 `builtinModules`）。
+5. **新增双轨一致性测试（13 例）**：`test/settings-tab.test.ts` 断言两条路径产出的**行名集合**、**分组标题集合**、**每行挂载的控件类型**三者一致。
+   配套增强了 `test/mocks/obsidian.ts` 的 `Setting` 桩（记录名字与控件）与 `PluginSettingTab` 桩（`update()` / `getSettingDefinitions()` / `requireApiVersion()`）。
+
+**关键决策**：
+- **用 sink 收敛而不是写两份实现**：obsidian-folio 与 obsidian-media-speed-enhancer 是「声明式定义 + 命令式渲染」两份实现，加设置要改两处。本插件用 RowSink 把两者收敛到一处，从结构上消除漂移。
+- **block（自定义块）也要占一行 Setting**：最初命令式路径直接往容器画、声明式路径产出一行，两边行数不同 → 「两条路径等价」这个不变量没法被断言守住。改为两边都产出一行。
+- **`deepCopy` 替代 JSON 往返**：`JSON.parse` 返回 `any`，是 5 个 `no-unsafe-assignment` 的来源；且 JSON 往返会**丢掉值为 `undefined` 的键**。手写递归拷贝既类型安全也更快。
+- **`builtin-modules` → `node:module` 的 `builtinModules`**：官方 API、覆盖更全（68 vs 41 个模块）、少一个依赖。行为一致（都不带 `node:` 前缀）。
+- **不屏蔽任何规则**：`eslint-comments/no-restricted-disable` 禁用屏蔽注释，所以每条 deprecated 告警都必须**真的消除**，不能用注释压掉。
+
+**反证（3 次，全部成功）**：
+- 删掉命令式路径的一整节 → 3 个测试失败
+- 让某一行不挂控件 → 「每个设置项都真的挂上了控件」用例失败（这条断言是补加的：双轨一致只能抓「两条路径不同」，抓不住「两条路径一致地错」）
+- 让 `render` 回调返回 Setting 对象 → 1 个测试失败（对应真实事故：Obsidian 1.13 会把 render 的返回值当清理函数调用 → `TypeError: t is not a function` → 设置子页面永远打不开）
+
+**测试**：`npm run verify` 全绿（typecheck + lint 0 问题 + stylelint + vitest + build）；215 → 228 用例。
+
+**未解决/风险**：
+- **全部改动未在真实 Obsidian 中加载验证**（本环境无 GUI）。双轨在 1.13+ 与 1.5.0–1.12 两个版本上的实际渲染效果需要实机确认。
+- 声明式路径下自定义块（分类卡片列表、预设列表）的**实际布局**未验证 —— 1.13+ 的 group 渲染由 Obsidian 负责，与命令式路径的 `jev-cat-list` 等 CSS 类的匹配情况未知。
+- 商店审查的其余 Warning 项（UI 用 Sentence case、不用 innerHTML、不设默认快捷键）未逐条自查。

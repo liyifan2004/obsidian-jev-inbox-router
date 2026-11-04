@@ -37,6 +37,10 @@ export default defineConfig([
 		"*.config.mts",
 		"version-bump.mjs",
 		"version-sync.mjs",
+		// 构建期脚本：跑在 Node 里而不是 Obsidian 里。
+		// 用插件的规则审它只会得到假告警（Node API、移动端兼容等），
+		// 它也不进发布产物（商店只下载 main.js / manifest.json / styles.css）。
+		"scripts/",
 	]),
 
 	...obsidianmd.configs.recommended,
@@ -53,12 +57,55 @@ export default defineConfig([
 			// 示例插件的占位类名。本插件用自己的前缀（jev-），
 			// 但规则本身仍要检查「有没有抄模板里的名字」。
 			"obsidianmd/sample-names": "off",
+
+			// UI 文案用 sentence case。
+			//
+			// brands 里放的是**产品标识**，不是普通英文词 ——
+			// 规则会把它们当成普通词小写（`JEV` → `Jev`），
+			// 但这些名字是 API 里的真实取值，改了就不对。
+			//
+			// 另加 ignoreRegex 跳过含汉字的字符串：
+			// 规则的分词正则只匹配 ASCII 字母数字，中文文案本来不受影响，
+			// 但中英混排（如「JEV 收件箱」）会被误判。中文 UI 不需要 sentence case。
+			"obsidianmd/ui/sentence-case": [
+				"warn",
+				{
+					enforceCamelCaseLower: true,
+					brands: ["JEV", "jev-latest", "API"],
+					ignoreRegex: ["[\\u4e00-\\u9fff]"],
+				},
+			],
+		},
+	},
+
+	{
+		// 移动端通知的降级实现：**刻意不用** Obsidian 的 DOM 扩展 API。
+		//
+		// obsidianmd/prefer-create-el 建议把
+		//   document.createDocumentFragment() → createFragment()
+		//   document.createElement("span")   → createSpan()
+		//   document.createElement("button") → createEl("button")
+		//
+		// 但 `createFragment` 在 obsidian.d.ts 里是 **declare global**，
+		// 不是导出成员 —— 运行时可用性未经验证。
+		// 而这段代码是移动端的**降级路径**，本来就要求在
+		// minAppVersion 1.5.0 上能用，所以只用最基础的标准 DOM。
+		//
+		// 规则的 autofix 会改写这里，所以对这一处单独豁免并写明理由，
+		// 而不是关掉整个规则（其他地方仍要它把关）。
+		files: ["src/main.ts"],
+		rules: {
+			"obsidianmd/prefer-create-el": "off",
 		},
 	},
 
 	{
 		// 测试文件不按「插件源码」的规则审 ——
 		// 商店审查看的是发布产物（main.js），测试里的 any 与断言是合理的。
+		//
+		// no-deprecated 也要放开：测试要**直接调用** display() 来跑命令式路径
+		// （minAppVersion 1.5.0 的那条路径），而 display() 在 1.13+ 的类型定义里
+		// 标了 @deprecated。测试里调用它是有意为之，不是遗留代码。
 		files: ["test/**/*.ts"],
 		rules: {
 			"@typescript-eslint/no-explicit-any": "off",
@@ -67,6 +114,8 @@ export default defineConfig([
 			"@typescript-eslint/no-unsafe-member-access": "off",
 			"@typescript-eslint/no-unsafe-return": "off",
 			"@typescript-eslint/no-unnecessary-type-assertion": "off",
+			"@typescript-eslint/no-deprecated": "off",
+			"obsidianmd/no-global-this": "off",
 		},
 	},
 ]);

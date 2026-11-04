@@ -1,9 +1,26 @@
-import { App, Menu, Notice, PluginSettingTab, Setting, setIcon } from "obsidian";
+import {
+	App,
+	Menu,
+	Notice,
+	PluginSettingTab,
+	Setting,
+	setIcon,
+	requireApiVersion,
+} from "obsidian";
 import { DEFAULT_CATEGORIES, DEFAULT_SETTINGS, JEV_ENDPOINT, MAX_CATEGORIES } from "./constants";
 import { t } from "./i18n";
 import { JevError } from "./jev-client";
 import { ConfirmModal } from "./modals";
 import { ORGANIZATION_PRESETS, presetById, remapPresetKeys } from "./presets";
+import {
+	createDeclarativeSink,
+	deepCopy,
+	createImperativeSink,
+	sectionHeading,
+	SECTION_KEYS,
+} from "./settings-definitions";
+import type { RowSink } from "./settings-definitions";
+import type { SettingDefinitionItem } from "obsidian";
 import type { CategoryConfig, JevSettings } from "./types";
 import type { PresetDefinition } from "./presets";
 import type JevInboxRouterPlugin from "./main";
@@ -39,26 +56,131 @@ export class JevSettingTab extends PluginSettingTab {
 		this.draft = plugin.settings;
 	}
 
+	/**
+	 * 声明式设置定义（Obsidian 1.13+）。
+	 *
+	 * 1.13+ 由 Obsidian 自己渲染这些定义，并把每一项登记进**设置搜索**
+	 * （用户在设置里搜「分类」「阈值」能直接定位到本插件）。
+	 * 没有它，本插件的设置在 1.13+ 的搜索里**完全不出现** ——
+	 * Obsidian 商店审查把这条列为 Warning。
+	 *
+	 * 与旧版路径的关系：**跑的是同一批节实现**（都经过 {@link RowSink}），
+	 * 所以不会出现「1.13+ 有、旧版没有」的不一致。
+	 * 见 src/settings-definitions.ts 的说明。
+	 *
+	 * 商店审查的两条硬约束在这里落地：
+	 *   - 分组标题不含插件名（`sectionHeading` 的注释）
+	 *   - 不用 `createEl("h2"/"h3")` 造标题（声明式由 Obsidian 渲染分组标题）
+	 */
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		const sink = createDeclarativeSink();
+
+		sink.heading(SECTION_KEYS.api);
+		this.renderApiSection(sink);
+
+		sink.heading(SECTION_KEYS.organization);
+		this.renderOrganizationSection(sink);
+
+		sink.heading(SECTION_KEYS.categories);
+		this.renderCategorySection(sink);
+
+		sink.heading(SECTION_KEYS.auto);
+		this.renderAutoSection(sink);
+
+		sink.heading(SECTION_KEYS.block);
+		this.renderBlockSection(sink);
+
+		sink.heading(SECTION_KEYS.statusBar);
+		this.renderStatusSection(sink);
+
+		sink.heading(SECTION_KEYS.maintenance);
+		this.renderMaintenanceSection(sink);
+
+		return sink.groups;
+	}
+
+	/**
+	 * 旧版命令式渲染入口（Obsidian 1.5.0–1.12）。
+	 *
+	 * 1.13+ 一旦 {@link getSettingDefinitions} 返回非空数组，Obsidian 就完全绕过
+	 * 这个方法，改为按声明式定义渲染并把每一项登记进「设置搜索」。
+	 * 两条路径共存、不会重复渲染。
+	 *
+	 * 方法体放在 {@link renderImperative} 里，是为了让刷新路径可以重画而不必
+	 * 调用 `this.display()` —— `display()` 在 1.13+ 的类型定义里标了 `@deprecated`，
+	 * 而官方 eslint 插件禁止用屏蔽注释压掉这条告警
+	 * （`eslint-comments/no-restricted-disable`）。
+	 * 官方规则 `obsidianmd/settings-tab/require-display` 也要求在
+	 * minAppVersion < 1.13.0 时保留 display() —— 本插件的 minAppVersion 是 1.5.0。
+	 *
+	 * 与同 fleet 的 obsidian-folio、obsidian-media-speed-enhancer 同一套模式。
+	 */
 	display(): void {
+		this.renderImperative();
+	}
+
+	/**
+	 * 重画设置页。
+	 *
+	 * 两条渲染路径要用不同的调用：
+	 *   - Obsidian 1.13+：声明式树由框架持有，重调 `display()` 不生效，
+	 *     必须用官方刷新 API `update()`。
+	 *   - Obsidian 1.13 以下：命令式渲染器就是渲染器本身，得重跑。
+	 *
+	 * `requireApiVersion` 是 Obsidian 官方的运行时特性探测，
+	 * 即使构建时的类型定义更旧也能正确判断。
+	 */
+	private refresh(): void {
+		if (requireApiVersion("1.13.0")) {
+			this.update();
+		} else {
+			this.renderImperative();
+		}
+	}
+
+	/**
+	 * 命令式渲染本体（Obsidian 1.5.0–1.12）。
+	 *
+	 * 与声明式路径**共用同一批节实现**（都经过 {@link RowSink}），
+	 * 所以不会出现「1.13+ 有、旧版没有」的不一致。
+	 */
+	private renderImperative(): void {
 		const { containerEl } = this;
 		this.draft = this.plugin.settings;
 		this.folders = this.plugin.router.getAllFolders();
 		containerEl.empty();
 		containerEl.addClass("jev-settings");
 
-		containerEl.createEl("h2", { text: "JEV Inbox Router" });
 		containerEl.createEl("p", {
 			cls: "jev-intro",
 			text: t("settingsIntro"),
 		});
 
-		this.renderApiSection(containerEl);
-		this.renderOrganizationSection(containerEl);
-		this.renderCategorySection(containerEl);
-		this.renderAutoSection(containerEl);
-		this.renderBlockSection(containerEl);
-		this.renderStatusSection(containerEl);
-		this.renderMaintenanceSection(containerEl);
+		const sink = createImperativeSink(containerEl);
+
+		// 分组标题：命令式路径下没有声明式的 group 概念，
+		// 所以自己用 setHeading() 画一条。标题文本来自同一个 sectionHeading()，
+		// 两边一致。
+		new Setting(containerEl).setName(sectionHeading(SECTION_KEYS.api)).setHeading();
+		this.renderApiSection(sink);
+
+		new Setting(containerEl).setName(sectionHeading(SECTION_KEYS.organization)).setHeading();
+		this.renderOrganizationSection(sink);
+
+		new Setting(containerEl).setName(sectionHeading(SECTION_KEYS.categories)).setHeading();
+		this.renderCategorySection(sink);
+
+		new Setting(containerEl).setName(sectionHeading(SECTION_KEYS.auto)).setHeading();
+		this.renderAutoSection(sink);
+
+		new Setting(containerEl).setName(sectionHeading(SECTION_KEYS.block)).setHeading();
+		this.renderBlockSection(sink);
+
+		new Setting(containerEl).setName(sectionHeading(SECTION_KEYS.statusBar)).setHeading();
+		this.renderStatusSection(sink);
+
+		new Setting(containerEl).setName(sectionHeading(SECTION_KEYS.maintenance)).setHeading();
+		this.renderMaintenanceSection(sink);
 	}
 
 	private async commit(): Promise<void> {
@@ -88,13 +210,9 @@ export class JevSettingTab extends PluginSettingTab {
 	}
 
 	// ------------------------------------------------------------- JEV 接口
-	private renderApiSection(root: HTMLElement): void {
-		root.createEl("h3", { text: t("sectionApi") });
-
-		new Setting(root)
-			.setName("API Key")
-			.setDesc(t("apiKeyDesc"))
-			.addText((text) => {
+	private renderApiSection(sink: RowSink): void {
+		sink.row("API Key", t("apiKeyDesc"), (setting) => {
+			setting.addText((text) => {
 				text.inputEl.type = "password";
 				text.inputEl.addClass("text-input", "jev-wide-input");
 				text.setPlaceholder(t("apiKeyPlaceholder"))
@@ -104,37 +222,34 @@ export class JevSettingTab extends PluginSettingTab {
 						await this.commit();
 					});
 			});
+		});
 
-		new Setting(root)
-			.setName(t("settingEndpoint"))
-			.setDesc(t("endpointDesc", { endpoint: JEV_ENDPOINT }))
-			.addText((t) => {
-				t.inputEl.addClass("text-input");
-				t.setPlaceholder(JEV_ENDPOINT)
+		sink.row(t("settingEndpoint"), t("endpointDesc", { endpoint: JEV_ENDPOINT }), (setting) => {
+			setting.addText((text) => {
+				text.inputEl.addClass("text-input");
+				text.setPlaceholder(JEV_ENDPOINT)
 					.setValue(this.draft.apiUrl)
 					.onChange(async (v) => {
 						this.draft.apiUrl = v.trim() || JEV_ENDPOINT;
 						await this.commit();
 					});
 			});
+		});
 
-		new Setting(root)
-			.setName(t("settingModel"))
-			.setDesc(t("modelDesc"))
-			.addText((t) => {
-				t.inputEl.addClass("text-input");
-				t.setPlaceholder("jev-latest")
+		sink.row(t("settingModel"), t("modelDesc"), (setting) => {
+			setting.addText((text) => {
+				text.inputEl.addClass("text-input");
+				text.setPlaceholder("jev-latest")
 					.setValue(this.draft.model)
 					.onChange(async (v) => {
 						this.draft.model = v.trim() || "jev-latest";
 						await this.commit();
 					});
 			});
+		});
 
-		new Setting(root)
-			.setName(t("settingTestConnection"))
-			.setDesc(t("testConnectionDesc"))
-			.addButton((b) =>
+		sink.row(t("settingTestConnection"), t("testConnectionDesc"), (setting) => {
+			setting.addButton((b) =>
 				b.setButtonText(t("btnTest")).onClick(async () => {
 					b.setDisabled(true).setButtonText(t("btnTesting"));
 					try {
@@ -171,93 +286,99 @@ export class JevSettingTab extends PluginSettingTab {
 					}
 				})
 			);
+		});
 	}
 
 	// ------------------------------------------------------------- 组织方式
-	private renderOrganizationSection(root: HTMLElement): void {
-		root.createEl("h3", { text: t("sectionOrganization") });
-		root.createEl("p", {
-			cls: "jev-hint",
-			text: t("orgHint"),
+	private renderOrganizationSection(sink: RowSink): void {
+		sink.block("presetList", (root) => {
+			root.createEl("p", {
+				cls: "jev-hint",
+				text: t("orgHint"),
+			});
+
+			// ---- 预设选择：真按钮行，点选只高亮，不立即生效 ----
+			const list = root.createDiv({ cls: "jev-preset-list" });
+			for (const preset of ORGANIZATION_PRESETS) {
+				const selected = this.selectedPresetId === preset.id;
+				const row = list.createEl("button", {
+					cls: "jev-row jev-preset-row",
+					attr: { type: "button" },
+				});
+				row.setAttribute("aria-pressed", String(selected));
+				if (selected) row.addClass("is-selected");
+
+				// 左侧圆点用该预设第一个分类的色，走 --jev-cat 按主题折算
+				const dot = row.createSpan({ cls: "jev-dot jev-ink" });
+				dot.style.setProperty("--jev-cat", preset.categories[0]?.color ?? "#7F8C99");
+
+				const main = row.createSpan({ cls: "jev-preset-main" });
+				main.createSpan({ cls: "jev-preset-name", text: preset.name });
+				main.createSpan({ cls: "jev-preset-desc", text: preset.description });
+
+				const meta = row.createSpan({
+					cls: "jev-preset-meta",
+					text: t("presetMeta", { count: preset.categories.length, folder: preset.inboxFolder }),
+				});
+				meta.setAttribute(
+					"title",
+					preset.categories
+						.map((c) => `${c.key} ${c.label} → ${c.folder || t("vaultRoot")}`)
+						.join("\n")
+				);
+
+				row.addEventListener("click", () => {
+					this.selectedPresetId = preset.id;
+					this.refresh();
+				});
+			}
 		});
 
-		// ---- 预设选择：真按钮行，点选只高亮，不立即生效 ----
-		const list = root.createDiv({ cls: "jev-preset-list" });
-		for (const preset of ORGANIZATION_PRESETS) {
-			const selected = this.selectedPresetId === preset.id;
-			const row = list.createEl("button", {
-				cls: "jev-row jev-preset-row",
-				attr: { type: "button" },
-			});
-			row.setAttribute("aria-pressed", String(selected));
-			if (selected) row.addClass("is-selected");
-
-			// 左侧圆点用该预设第一个分类的色，走 --jev-cat 按主题折算
-			const dot = row.createSpan({ cls: "jev-dot jev-ink" });
-			dot.style.setProperty("--jev-cat", preset.categories[0]?.color ?? "#7F8C99");
-
-			const main = row.createSpan({ cls: "jev-preset-main" });
-			main.createSpan({ cls: "jev-preset-name", text: preset.name });
-			main.createSpan({ cls: "jev-preset-desc", text: preset.description });
-
-			const meta = row.createSpan({
-				cls: "jev-preset-meta",
-				text: t("presetMeta", { count: preset.categories.length, folder: preset.inboxFolder }),
-			});
-			meta.setAttribute(
-				"title",
-				preset.categories
-					.map((c) => `${c.key} ${c.label} → ${c.folder || t("vaultRoot")}`)
-					.join("\n")
-			);
-
-			row.addEventListener("click", () => {
-				this.selectedPresetId = preset.id;
-				this.display();
-			});
-		}
-
 		// ---- 应用方式 ----
-		new Setting(root)
-			.setName(t("settingApplyMode"))
-			.setDesc(t("applyModeDesc"))
-			.addDropdown((d) =>
-				d
-					.addOptions({ replace: t("optionReplace"), append: t("optionAppend") })
-					.setValue(this.applyMode)
-					.onChange((v) => {
-						this.applyMode = v === "append" ? "append" : "replace";
-					})
-			)
-			.addToggle((toggle) => {
-				toggle.setValue(this.applyCreateFolders).onChange((v) => {
-					this.applyCreateFolders = v;
+		sink.row(t("settingApplyMode"), t("applyModeDesc"), (setting) => {
+			setting
+				.addDropdown((d) =>
+					d
+						.addOptions({ replace: t("optionReplace"), append: t("optionAppend") })
+						.setValue(this.applyMode)
+						.onChange((v) => {
+							this.applyMode = v === "append" ? "append" : "replace";
+						})
+				)
+				.addToggle((toggle) => {
+					toggle.setValue(this.applyCreateFolders).onChange((v) => {
+						this.applyCreateFolders = v;
+					});
+					toggle.toggleEl.setAttribute("aria-label", t("ariaCreateFolders"));
+					toggle.toggleEl.setAttribute("title", t("ariaCreateFolders"));
+					return toggle;
 				});
-				toggle.toggleEl.setAttribute("aria-label", t("ariaCreateFolders"));
-				toggle.toggleEl.setAttribute("title", t("ariaCreateFolders"));
-				return toggle;
-			});
+		});
 
 		// ---- 应用（本节唯一 CTA）+ 还原 ----
 		const preset = this.selectedPresetId ? presetById(this.selectedPresetId) : undefined;
-		const bar = new Setting(root)
-			.setName(preset ? t("applyBarWithPreset", { name: preset.name }) : t("applyBarName"))
-			.setDesc(preset ? t("applyBarDescConfirm") : t("applyBarDescPick"))
-			.addButton((b) =>
-				b
-					.setButtonText(t("btnApplyPreset"))
-					.setCta()
-					.setDisabled(!preset)
-					.onClick(() => {
-						if (preset) this.confirmApplyPreset(preset);
-					})
-			);
+		sink.row(
+			preset ? t("applyBarWithPreset", { name: preset.name }) : t("applyBarName"),
+			preset ? t("applyBarDescConfirm") : t("applyBarDescPick"),
+			(setting) => {
+				setting.addButton((b) =>
+					b
+						.setButtonText(t("btnApplyPreset"))
+						.setCta()
+						.setDisabled(!preset)
+						.onClick(() => {
+							if (preset) this.confirmApplyPreset(preset);
+						})
+				);
 
-		if (this.draft.previousCategories && this.draft.previousCategories.length > 0) {
-			bar.addButton((b) =>
-				b.setButtonText(t("btnRestorePrevious")).onClick(() => this.confirmRestorePrevious())
-			);
-		}
+				if (this.draft.previousCategories && this.draft.previousCategories.length > 0) {
+					setting.addButton((b) =>
+						b
+							.setButtonText(t("btnRestorePrevious"))
+							.onClick(() => this.confirmRestorePrevious())
+					);
+				}
+		});
 	}
 
 	/** 应用预设前，把文件夹清单写进确认文案（含 index 目录，去重） */
@@ -304,8 +425,8 @@ export class JevSettingTab extends PluginSettingTab {
 			onConfirm: async () => {
 				if (replace) {
 					// 快照先行：存完再整体替换
-					this.draft.previousCategories = JSON.parse(JSON.stringify(this.draft.categories));
-					this.draft.categories = preset.categories.map((c) => JSON.parse(JSON.stringify(c)));
+					this.draft.previousCategories = deepCopy(this.draft.categories);
+					this.draft.categories = preset.categories.map((c) => deepCopy(c));
 				} else {
 					const total = this.draft.categories.length + preset.categories.length;
 					if (total > MAX_CATEGORIES) {
@@ -326,7 +447,7 @@ export class JevSettingTab extends PluginSettingTab {
 				this.draft.inboxFolders = [preset.inboxFolder];
 				await this.commit();
 				this.selectedPresetId = null;
-				this.display();
+				this.refresh();
 				new Notice(
 					replace
 						? t("noticePresetReplaced", { name: preset.name })
@@ -363,65 +484,68 @@ export class JevSettingTab extends PluginSettingTab {
 			}),
 			confirmText: t("confirmRestore"),
 			onConfirm: async () => {
-				this.draft.categories = JSON.parse(JSON.stringify(snapshot));
+				this.draft.categories = deepCopy(snapshot);
 				this.draft.previousCategories = null;
 				await this.commit();
-				this.display();
+				this.refresh();
 				new Notice(t("noticeRestored"));
 			},
 		}).open();
 	}
 
 	// --------------------------------------------------------- 分类与去向
-	private renderCategorySection(root: HTMLElement): void {
-		root.createEl("h3", { text: t("sectionCategories") });
-		root.createEl("p", {
-			cls: "jev-hint",
-			text: t("categoriesHint"),
+	private renderCategorySection(sink: RowSink): void {
+		sink.block("categoryList", (root) => {
+			root.createEl("p", {
+				cls: "jev-hint",
+				text: t("categoriesHint"),
+			});
+
+			const wrap = root.createDiv({ cls: "jev-cat-list" });
+			this.draft.categories.forEach((cat, index) => {
+				this.renderCategoryCard(wrap, cat, index);
+			});
 		});
 
-		const wrap = root.createDiv({ cls: "jev-cat-list" });
-		this.draft.categories.forEach((cat, index) => {
-			this.renderCategoryCard(wrap, cat, index);
+		sink.block("categoryActions", (root) => {
+			const bar = new Setting(root);
+			bar.addButton((b) =>
+				b.setButtonText(t("btnAddCategory")).onClick(async () => {
+					if (this.draft.categories.length >= MAX_CATEGORIES) {
+						new Notice(t("noticeMaxCategories", { max: MAX_CATEGORIES }));
+						return;
+					}
+					const used = new Set(this.draft.categories.map((c) => c.key));
+					const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+					const key = alphabet.find((k) => !used.has(k)) ?? `K${Date.now() % 1000}`;
+					this.draft.categories.push({
+						key,
+						label: t("newCategoryName"),
+						short: t("newCategoryName"),
+						description: "",
+						folder: "",
+						tag: "",
+						enabled: true,
+						color: "#7F8C99",
+					});
+					this.expanded.add(key);
+					await this.commit();
+					this.refresh();
+				})
+			);
+			this.addOverflowButton(bar, [
+				{
+					title: t("overflowResetAll"),
+					icon: "rotate-ccw",
+					onClick: () => this.confirmResetCategories(),
+				},
+				{
+					title: t("overflowResetNames"),
+					icon: "type",
+					onClick: () => this.confirmResetNames(),
+				},
+			]);
 		});
-
-		const bar = new Setting(root);
-		bar.addButton((b) =>
-			b.setButtonText(t("btnAddCategory")).onClick(async () => {
-				if (this.draft.categories.length >= MAX_CATEGORIES) {
-					new Notice(t("noticeMaxCategories", { max: MAX_CATEGORIES }));
-					return;
-				}
-				const used = new Set(this.draft.categories.map((c) => c.key));
-				const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
-				const key = alphabet.find((k) => !used.has(k)) ?? `K${Date.now() % 1000}`;
-				this.draft.categories.push({
-					key,
-					label: t("newCategoryName"),
-					short: t("newCategoryName"),
-					description: "",
-					folder: "",
-					tag: "",
-					enabled: true,
-					color: "#7F8C99",
-				});
-				this.expanded.add(key);
-				await this.commit();
-				this.display();
-			})
-		);
-		this.addOverflowButton(bar, [
-			{
-				title: t("overflowResetAll"),
-				icon: "rotate-ccw",
-				onClick: () => this.confirmResetCategories(),
-			},
-			{
-				title: t("overflowResetNames"),
-				icon: "type",
-				onClick: () => this.confirmResetNames(),
-			},
-		]);
 	}
 
 	private confirmResetCategories(): void {
@@ -430,10 +554,10 @@ export class JevSettingTab extends PluginSettingTab {
 			body: t("resetCategoriesBody"),
 			confirmText: t("confirmResetCategories"),
 			onConfirm: async () => {
-				this.draft.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+				this.draft.categories = deepCopy(DEFAULT_CATEGORIES);
 				this.expanded.clear();
 				await this.commit();
-				this.display();
+				this.refresh();
 				new Notice(t("noticeResetCategories"));
 			},
 		}).open();
@@ -454,7 +578,7 @@ export class JevSettingTab extends PluginSettingTab {
 					}
 				}
 				await this.commit();
-				this.display();
+				this.refresh();
 				new Notice(t("noticeResetNames"));
 			},
 		}).open();
@@ -483,7 +607,7 @@ export class JevSettingTab extends PluginSettingTab {
 		chev.addEventListener("click", () => {
 			if (this.expanded.has(cat.key)) this.expanded.delete(cat.key);
 			else this.expanded.add(cat.key);
-			this.display();
+			this.refresh();
 		});
 
 		const dot = head.createSpan({ cls: "jev-dot jev-ink" });
@@ -508,11 +632,12 @@ export class JevSettingTab extends PluginSettingTab {
 				"aria-label": t("ariaCategoryName", { key: cat.key }),
 			},
 		});
-		labelInput.addEventListener("change", async () => {
+		// DOM 事件监听器不消费返回的 Promise（@typescript-eslint/no-misused-promises），
+		// 所以用 void 显式标注。commit() 内部自己处理保存失败，不会变成 unhandled rejection。
+		labelInput.addEventListener("change", () => {
 			cat.label = labelInput.value.trim() || cat.label;
 			if (!cat.short) cat.short = cat.label;
-			await this.commit();
-			this.display();
+			void this.commit().then(() => this.refresh());
 		});
 
 		const preview = head.createSpan({
@@ -534,7 +659,8 @@ export class JevSettingTab extends PluginSettingTab {
 			},
 		});
 		toggle.checked = cat.enabled;
-		toggle.addEventListener("change", async () => {
+		// 同上：DOM 事件监听器不消费 Promise，用 void 显式标注。
+		toggle.addEventListener("change", () => {
 			cat.enabled = toggle.checked;
 			// 只切换禁用类，避免重渲染导致焦点丢失；颜色由 CSS 接管
 			card.toggleClass("is-disabled", !cat.enabled);
@@ -545,7 +671,7 @@ export class JevSettingTab extends PluginSettingTab {
 			} else {
 				dot.style.removeProperty("--jev-cat");
 			}
-			await this.commit();
+			void this.commit();
 		});
 		head.createEl("label", { cls: "jev-toggle-label", text: t("enable"), attr: { for: toggleId } });
 
@@ -555,85 +681,85 @@ export class JevSettingTab extends PluginSettingTab {
 		const body = card.createDiv({ cls: "jev-cat-body" });
 		body.setAttribute("id", bodyId);
 
-		new Setting(body)
-			.setName(t("settingTargetFolder"))
-			.setDesc(t("targetFolderDesc"))
-			.addDropdown((d) => {
+		// 展开区里的每一项都是标准设置行。用命令式 sink 画：
+		// 这一段只在「分类卡片」内部出现，声明式路径下同样是自定义块，
+		// 不参与声明式的行定义。
+		const bodySink = createImperativeSink(body);
+
+		bodySink.row(t("settingTargetFolder"), t("targetFolderDesc"), (setting) => {
+			setting.addDropdown((d) => {
 				d.addOptions(folderOptions(cat.folder, this.folders));
 				d.setValue(cat.folder);
 				d.onChange(async (v) => {
 					cat.folder = v;
 					await this.commit();
-					this.display();
+					this.refresh();
 				});
 			});
+		});
 
-		new Setting(body)
-			.setName(t("settingCriteria"))
-			.setDesc(t("criteriaDesc"))
-			.addTextArea((t) => {
-				t.inputEl.rows = 3;
-				t.inputEl.addClass("text-input", "jev-wide-input");
-				t.setValue(cat.description).onChange(async (v) => {
+		bodySink.row(t("settingCriteria"), t("criteriaDesc"), (setting) => {
+			setting.addTextArea((text) => {
+				text.inputEl.rows = 3;
+				text.inputEl.addClass("text-input", "jev-wide-input");
+				text.setValue(cat.description).onChange(async (v) => {
 					cat.description = v;
 					await this.commit();
 				});
 			});
+		});
 
-		new Setting(body)
-			.setName(t("settingShortName"))
-			.setDesc(t("shortNameDesc"))
-			.addText((t) => {
-				t.inputEl.addClass("text-input");
-				t.setValue(cat.short).onChange(async (v) => {
+		bodySink.row(t("settingShortName"), t("shortNameDesc"), (setting) => {
+			setting.addText((text) => {
+				text.inputEl.addClass("text-input");
+				text.setValue(cat.short).onChange(async (v) => {
 					cat.short = v.trim() || cat.label;
 					await this.commit();
 				});
 			});
+		});
 
-		new Setting(body)
-			.setName(t("settingTag"))
-			.setDesc(t("tagDesc"))
-			.addText((t) => {
-				t.inputEl.addClass("text-input");
-				t.setValue(cat.tag).onChange(async (v) => {
+		bodySink.row(t("settingTag"), t("tagDesc"), (setting) => {
+			setting.addText((text) => {
+				text.inputEl.addClass("text-input");
+				text.setValue(cat.tag).onChange(async (v) => {
 					cat.tag = v.trim();
 					await this.commit();
 				});
 			});
+		});
 
 		let hexEl: HTMLElement | null = null;
-		new Setting(body)
-			.setName(t("settingColor"))
-			.setDesc(t("colorDesc"))
-			.addText((t) => {
-				t.inputEl.type = "color";
-				t.inputEl.addClass("jev-color-input");
-				t.setValue(cat.color).onChange(async (v) => {
-					cat.color = v;
-					// 禁用时不要写 inline --jev-cat ——
-					// 否则会绕过禁用态的灰色（那条 CSS 规则只在没有 inline 值时生效）
-					if (cat.enabled) {
-						dot.style.setProperty("--jev-cat", v);
-					}
-					hexEl?.setText(v.toUpperCase());
-					await this.commit();
-				});
-				hexEl = t.inputEl.parentElement?.createSpan({
-					cls: "jev-color-hex",
-					text: cat.color.toUpperCase(),
-				}) ?? null;
-			})
-			.addExtraButton((b) =>
-				b
-					.setIcon("arrow-up")
-					.setTooltip(t("tooltipMoveUp"))
+		bodySink.row(t("settingColor"), t("colorDesc"), (setting) => {
+			setting
+				.addText((text) => {
+					text.inputEl.type = "color";
+					text.inputEl.addClass("jev-color-input");
+					text.setValue(cat.color).onChange(async (v) => {
+						cat.color = v;
+						// 禁用时不要写 inline --jev-cat ——
+						// 否则会绕过禁用态的灰色（那条 CSS 规则只在没有 inline 值时生效）
+						if (cat.enabled) {
+							dot.style.setProperty("--jev-cat", v);
+						}
+						hexEl?.setText(v.toUpperCase());
+						await this.commit();
+					});
+					hexEl = text.inputEl.parentElement?.createSpan({
+						cls: "jev-color-hex",
+						text: cat.color.toUpperCase(),
+					}) ?? null;
+				})
+				.addExtraButton((b) =>
+					b
+						.setIcon("arrow-up")
+						.setTooltip(t("tooltipMoveUp"))
 					.onClick(async () => {
 						if (index === 0) return;
 						const arr = this.draft.categories;
 						[arr[index - 1], arr[index]] = [arr[index], arr[index - 1]];
 						await this.commit();
-						this.display();
+						this.refresh();
 					})
 			)
 			.addExtraButton((b) =>
@@ -645,7 +771,7 @@ export class JevSettingTab extends PluginSettingTab {
 						if (index >= arr.length - 1) return;
 						[arr[index + 1], arr[index]] = [arr[index], arr[index + 1]];
 						await this.commit();
-						this.display();
+						this.refresh();
 					})
 			)
 			.addExtraButton((b) =>
@@ -660,39 +786,34 @@ export class JevSettingTab extends PluginSettingTab {
 						this.draft.categories.splice(index, 1);
 						this.expanded.delete(cat.key);
 						await this.commit();
-						this.display();
+						this.refresh();
 					})
 			);
+		});
 	}
 
 	// ------------------------------------------------------------ 自动分流
-	private renderAutoSection(root: HTMLElement): void {
-		root.createEl("h3", { text: t("sectionAuto") });
-
-		new Setting(root)
-			.setName(t("settingMoveOnJudge"))
-			.setDesc(t("moveOnJudgeDesc"))
-			.addToggle((t) =>
-				t.setValue(this.draft.moveOnJudge).onChange(async (v) => {
+	private renderAutoSection(sink: RowSink): void {
+		sink.row(t("settingMoveOnJudge"), t("moveOnJudgeDesc"), (setting) => {
+			setting.addToggle((toggle) =>
+				toggle.setValue(this.draft.moveOnJudge).onChange(async (v) => {
 					this.draft.moveOnJudge = v;
 					await this.commit();
 				})
 			);
+		});
 
-		new Setting(root)
-			.setName(t("settingAutoRoute"))
-			.setDesc(t("autoRouteDesc"))
-			.addToggle((t) =>
-				t.setValue(this.draft.autoRouteEnabled).onChange(async (v) => {
+		sink.row(t("settingAutoRoute"), t("autoRouteDesc"), (setting) => {
+			setting.addToggle((toggle) =>
+				toggle.setValue(this.draft.autoRouteEnabled).onChange(async (v) => {
 					this.draft.autoRouteEnabled = v;
 					await this.commit();
 				})
 			);
+		});
 
-		new Setting(root)
-			.setName(t("settingWatchScope"))
-			.setDesc(t("watchScopeDesc"))
-			.addDropdown((d) =>
+		sink.row(t("settingWatchScope"), t("watchScopeDesc"), (setting) => {
+			setting.addDropdown((d) =>
 				d
 					.addOptions({
 						inbox: t("optionWatchInbox"),
@@ -702,17 +823,16 @@ export class JevSettingTab extends PluginSettingTab {
 					.onChange(async (v) => {
 						this.draft.watchScope = v as JevSettings["watchScope"];
 						await this.commit();
-						this.display();
+						this.refresh();
 					})
 			);
+		});
 
 		if (this.draft.watchScope === "inbox") {
-			new Setting(root)
-				.setName(t("settingIndexFolder"))
-				.setDesc(t("indexFolderDesc"))
-				.addText((t) => {
-					t.inputEl.addClass("text-input");
-					t.setPlaceholder("Inbox")
+			sink.row(t("settingIndexFolder"), t("indexFolderDesc"), (setting) => {
+				setting.addText((text) => {
+					text.inputEl.addClass("text-input");
+					text.setPlaceholder("Inbox")
 						.setValue(this.draft.indexFolder)
 						.onChange(async (v) => {
 							const clean = v.trim();
@@ -722,86 +842,76 @@ export class JevSettingTab extends PluginSettingTab {
 							await this.commit();
 						});
 				});
+			});
 		}
 
-		new Setting(root)
-			.setName(t("settingDelay"))
-			.setDesc(t("delayDesc"))
-			.addSlider((s) =>
+		sink.row(t("settingDelay"), t("delayDesc"), (setting) => {
+			setting.addSlider((s) =>
 				s
 					.setLimits(1, 60, 1)
 					.setValue(Math.round(this.draft.autoRouteDelayMs / 1000))
-					.setDynamicTooltip()
 					.onChange(async (v) => {
 						this.draft.autoRouteDelayMs = v * 1000;
 						await this.commit();
 					})
 			);
+		});
 
-		new Setting(root)
-			.setName(t("settingConfirm"))
-			.setDesc(t("confirmDesc"))
-			.addToggle((t) =>
-				t.setValue(this.draft.autoRouteRequireConfirm).onChange(async (v) => {
+		sink.row(t("settingConfirm"), t("confirmDesc"), (setting) => {
+			setting.addToggle((toggle) =>
+				toggle.setValue(this.draft.autoRouteRequireConfirm).onChange(async (v) => {
 					this.draft.autoRouteRequireConfirm = v;
 					await this.commit();
 				})
 			);
+		});
 
-		new Setting(root)
-			.setName(t("settingMinChars"))
-			.setDesc(t("minCharsDesc"))
-			.addText((t) => {
-				t.inputEl.addClass("text-input");
-				t.setValue(String(this.draft.minChars)).onChange(async (v) => {
+		sink.row(t("settingMinChars"), t("minCharsDesc"), (setting) => {
+			setting.addText((text) => {
+				text.inputEl.addClass("text-input");
+				text.setValue(String(this.draft.minChars)).onChange(async (v) => {
 					const n = Number.parseInt(v, 10);
 					this.draft.minChars = Number.isFinite(n) && n >= 0 ? n : 12;
 					await this.commit();
 				});
 			});
+		});
 
-		new Setting(root)
-			.setName(t("settingConfidence"))
-			.setDesc(t("confidenceDesc"))
-			.addSlider((s) =>
+		sink.row(t("settingConfidence"), t("confidenceDesc"), (setting) => {
+			setting.addSlider((s) =>
 				s
 					.setLimits(0.1, 0.9, 0.05)
 					.setValue(this.draft.confidenceThreshold)
-					.setDynamicTooltip()
 					.onChange(async (v) => {
 						this.draft.confidenceThreshold = v;
 						await this.commit();
 					})
 			);
+		});
 
-		new Setting(root)
-			.setName(t("settingMargin"))
-			.setDesc(t("marginDesc"))
-			.addSlider((s) =>
+		sink.row(t("settingMargin"), t("marginDesc"), (setting) => {
+			setting.addSlider((s) =>
 				s
 					.setLimits(1, 5, 0.1)
 					.setValue(this.draft.marginThreshold)
-					.setDynamicTooltip()
 					.onChange(async (v) => {
 						this.draft.marginThreshold = v;
 						await this.commit();
 					})
 			);
+		});
 
-		new Setting(root)
-			.setName(t("settingLowValue"))
-			.setDesc(t("lowValueDesc"))
-			.addToggle((t) =>
-				t.setValue(this.draft.lowValueEnabled).onChange(async (v) => {
+		sink.row(t("settingLowValue"), t("lowValueDesc"), (setting) => {
+			setting.addToggle((toggle) =>
+				toggle.setValue(this.draft.lowValueEnabled).onChange(async (v) => {
 					this.draft.lowValueEnabled = v;
 					await this.commit();
 				})
 			);
+		});
 
-		new Setting(root)
-			.setName(t("settingDeletion"))
-			.setDesc(t("deletionDesc"))
-			.addDropdown((d) =>
+		sink.row(t("settingDeletion"), t("deletionDesc"), (setting) => {
+			setting.addDropdown((d) =>
 				d
 					.addOptions({
 						mark: t("optionDeletionMark"),
@@ -814,25 +924,22 @@ export class JevSettingTab extends PluginSettingTab {
 						await this.commit();
 					})
 			);
+		});
 	}
 
 	// -------------------------------------------------------- 判断信息块
-	private renderBlockSection(root: HTMLElement): void {
-		root.createEl("h3", { text: t("sectionBlock") });
-
-		new Setting(root)
-			.setName(t("settingBlockEnabled"))
-			.setDesc(t("blockEnabledDesc"))
-			.addToggle((t) =>
-				t.setValue(this.draft.blockEnabled).onChange(async (v) => {
+	private renderBlockSection(sink: RowSink): void {
+		sink.row(t("settingBlockEnabled"), t("blockEnabledDesc"), (setting) => {
+			setting.addToggle((toggle) =>
+				toggle.setValue(this.draft.blockEnabled).onChange(async (v) => {
 					this.draft.blockEnabled = v;
 					await this.commit();
 				})
 			);
+		});
 
-		new Setting(root)
-			.setName(t("settingPlacement"))
-			.addDropdown((d) =>
+		sink.row(t("settingPlacement"), undefined, (setting) => {
+			setting.addDropdown((d) =>
 				d
 					.addOptions({ top: t("optionTop"), bottom: t("optionBottom") })
 					.setValue(this.draft.blockPlacement)
@@ -841,11 +948,10 @@ export class JevSettingTab extends PluginSettingTab {
 						await this.commit();
 					})
 			);
+		});
 
-		new Setting(root)
-			.setName(t("settingBlockStyle"))
-			.setDesc(t("blockStyleDesc"))
-			.addDropdown((d) =>
+		sink.row(t("settingBlockStyle"), t("blockStyleDesc"), (setting) => {
+			setting.addDropdown((d) =>
 				d
 					.addOptions({
 						callout: t("optionCallout"),
@@ -858,49 +964,43 @@ export class JevSettingTab extends PluginSettingTab {
 						await this.commit();
 					})
 			);
+		});
 
-		new Setting(root)
-			.setName(t("settingShowProbabilities"))
-			.setDesc(t("showProbabilitiesDesc"))
-			.addToggle((t) =>
-				t.setValue(this.draft.blockShowProbabilities).onChange(async (v) => {
+		sink.row(t("settingShowProbabilities"), t("showProbabilitiesDesc"), (setting) => {
+			setting.addToggle((toggle) =>
+				toggle.setValue(this.draft.blockShowProbabilities).onChange(async (v) => {
 					this.draft.blockShowProbabilities = v;
 					await this.commit();
 				})
 			);
+		});
 
-		new Setting(root)
-			.setName(t("settingFrontmatter"))
-			.setDesc(t("frontmatterDesc"))
-			.addToggle((t) =>
-				t.setValue(this.draft.writeFrontmatter).onChange(async (v) => {
+		sink.row(t("settingFrontmatter"), t("frontmatterDesc"), (setting) => {
+			setting.addToggle((toggle) =>
+				toggle.setValue(this.draft.writeFrontmatter).onChange(async (v) => {
 					this.draft.writeFrontmatter = v;
 					await this.commit();
 				})
 			);
+		});
 	}
 
 	// ------------------------------------------------------------- 状态栏
-	private renderStatusSection(root: HTMLElement): void {
-		root.createEl("h3", { text: t("sectionStatusBar") });
-
-		new Setting(root)
-			.setName(t("settingStatusBar"))
-			.setDesc(t("statusBarDesc"))
-			.addToggle((t) =>
-				t.setValue(this.draft.statusBarEnabled).onChange(async (v) => {
+	private renderStatusSection(sink: RowSink): void {
+		sink.row(t("settingStatusBar"), t("statusBarDesc"), (setting) => {
+			setting.addToggle((toggle) =>
+				toggle.setValue(this.draft.statusBarEnabled).onChange(async (v) => {
 					this.draft.statusBarEnabled = v;
 					await this.commit();
 					this.plugin.refreshStatusBar();
 				})
 			);
+		});
 
-		new Setting(root)
-			.setName(t("settingClearMs"))
-			.setDesc(t("clearMsDesc"))
-			.addText((t) => {
-				t.inputEl.addClass("text-input");
-				t.setValue(String(Math.round(this.draft.statusBarClearMs / 1000))).onChange(
+		sink.row(t("settingClearMs"), t("clearMsDesc"), (setting) => {
+			setting.addText((text) => {
+				text.inputEl.addClass("text-input");
+				text.setValue(String(Math.round(this.draft.statusBarClearMs / 1000))).onChange(
 					async (v) => {
 						const n = Number.parseInt(v, 10);
 						this.draft.statusBarClearMs =
@@ -909,31 +1009,28 @@ export class JevSettingTab extends PluginSettingTab {
 					}
 				);
 			});
+		});
 	}
 
 	// ---------------------------------------------------------- 缓存与重置
-	private renderMaintenanceSection(root: HTMLElement): void {
-		root.createEl("h3", { text: t("sectionMaintenance") });
-
-		new Setting(root)
-			.setName(t("settingCacheMinutes"))
-			.setDesc(t("cacheDesc"))
-			.addText((t) => {
-				t.inputEl.addClass("text-input");
-				t.setValue(String(this.draft.cacheMinutes)).onChange(async (v) => {
+	private renderMaintenanceSection(sink: RowSink): void {
+		sink.row(t("settingCacheMinutes"), t("cacheDesc"), (setting) => {
+			setting.addText((text) => {
+				text.inputEl.addClass("text-input");
+				text.setValue(String(this.draft.cacheMinutes)).onChange(async (v) => {
 					const n = Number.parseInt(v, 10);
 					this.draft.cacheMinutes = Number.isFinite(n) && n >= 0 ? n : 30;
 					await this.commit();
 				});
 			});
+		});
 
-		const bar = new Setting(root)
-			.setName(t("settingResetBar"))
-			.setDesc(t("resetBarDesc", { count: this.plugin.cacheSize() }));
-		this.addOverflowButton(bar, [
-			{ title: t("overflowClearCache"), icon: "database", onClick: () => this.confirmClearCache() },
-			{ title: t("overflowRestoreAll"), icon: "alert-triangle", onClick: () => this.confirmRestoreAll() },
-		]);
+		sink.row(t("settingResetBar"), t("resetBarDesc", { count: this.plugin.cacheSize() }), (setting) => {
+			this.addOverflowButton(setting, [
+				{ title: t("overflowClearCache"), icon: "database", onClick: () => this.confirmClearCache() },
+				{ title: t("overflowRestoreAll"), icon: "alert-triangle", onClick: () => this.confirmRestoreAll() },
+			]);
+		});
 	}
 
 	private confirmClearCache(): void {
@@ -944,7 +1041,7 @@ export class JevSettingTab extends PluginSettingTab {
 			onConfirm: () => {
 				this.plugin.clearCache();
 				new Notice(t("noticeCacheCleared"));
-				this.display();
+				this.refresh();
 			},
 		}).open();
 	}
@@ -955,9 +1052,9 @@ export class JevSettingTab extends PluginSettingTab {
 			body: t("restoreAllBody"),
 			confirmText: t("confirmRestoreAllBtn"),
 			onConfirm: async () => {
-				this.draft = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+				this.draft = deepCopy(DEFAULT_SETTINGS);
 				await this.commit();
-				this.display();
+				this.refresh();
 				new Notice(t("noticeAllRestored"));
 			},
 		}).open();

@@ -16,9 +16,9 @@ JEV Inbox Router 的长期维护依据。以**当前源码与可验证行为**�
 | 用途 | 调用 JEV（TypeSafe System One）判断笔记归属分类，建议或自动移动到对应文件夹。**不生成内容** |
 | 目标用户 | 用收件箱工作流收集碎片信息的 Obsidian 用户 |
 | 兼容版本 | `minAppVersion: 1.5.0`，`isDesktopOnly: false`（**vault.process 的版本要求待核实，见 TR 记录**） |
-| 技术栈 | TypeScript 5.4 / esbuild 0.28 / vitest 5 / obsidian `latest`（devDependency） |
+| 技术栈 | TypeScript 5.4 / esbuild 0.28 / vitest 5 / obsidian `^1.13.1`（devDependency） |
 | 入口 | `src/main.ts`（`JevInboxRouterPlugin extends Plugin`）→ esbuild 打包为 `main.js` |
-| 验证命令 | `npm run verify` = typecheck + vitest + build（2026-10-23 维护批次后：197 用例全绿） |
+| 验证命令 | `npm run verify` = typecheck + **lint** + lint:styles + vitest + build（2026-11-05 维护批次后：228 用例全绿，lint 0 问题） |
 | 持久化 | `data.json`：`{ settings, cache, undo }`（`PersistedData`，main.ts:13） |
 
 ### 模块地图
@@ -31,7 +31,8 @@ JEV Inbox Router 的长期维护依据。以**当前源码与可验证行为**�
 | `rules.ts` | 纯规则：双门槛、删除类识别、路径归一、过短判断、状态栏视图 | note-writer(pct), i18n |
 | `note-writer.ts` | 判断块与 frontmatter 的生成/写入/剥离，判断输入净化 | constants, i18n |
 | `settings-normalize.ts` | data.json → 完整 `JevSettings` 的补齐与迁移 | constants |
-| `settings-tab.ts` | 设置页（API/组织方式/分类/自动/块/状态栏/维护 7 节） | presets, modals, main |
+| `settings-tab.ts` | 设置页（API/组织方式/分类/自动/块/状态栏/维护 7 节）；**双轨**：声明式 `getSettingDefinitions()` + 命令式 `display()` fallback，共用同一批节实现 | presets, modals, main, settings-definitions |
+| `settings-definitions.ts` | 设置页的**单一事实来源**：RowSink 抽象（声明式 sink 收集定义 / 命令式 sink 画 DOM）+ 分组标题 + `deepCopy` | i18n |
 | `presets.ts` | 6 套组织方式预设 + key 重映射 | constants, i18n |
 | `modals.ts` | 判断详情 / 分类选择 / 文件夹选择 / 二次确认弹窗 | rules, i18n |
 | `i18n.ts` | zh/en 文案（按 `moment.locale()`），`t()` 插值 | — |
@@ -293,8 +294,9 @@ JEV Inbox Router 的长期维护依据。以**当前源码与可验证行为**�
 | settings-normalize.test.ts | 24 | 迁移/校验（含布尔脏值） | — |
 | presets.test.ts | 13 | 预设/remap | — |
 | i18n.test.ts | 4 | t()/快照 | — |
-| **合计** | **199** | | |
-| **无** | — | main.ts / modals.ts / settings-tab.ts | 纯接线/UI 层，靠手工验证（README 已声明） |
+| settings-tab.test.ts | 13 | 设置页双轨一致性（行名/分组标题/控件类型逐项比对）+ deepCopy | settings-definitions |
+| **合计** | **228** | | |
+| **无** | — | main.ts / modals.ts | 纯接线层，靠手工验证（README 已声明） |
 
 ## 7. 待核实清单（不得当已验证用）
 
@@ -303,6 +305,8 @@ JEV Inbox Router 的长期维护依据。以**当前源码与可验证行为**�
 3. `autoRouteRequireConfirm` 的弹窗在移动端/多窗口下的焦点行为。
 4. 真实 JEV 端点的计费与限流行为（README 计费数字未在本轮核对）。
 5. UI-REVIEW.md 中的实机待验项（键盘走查、触摸命中区、断点、reduced-motion、读屏）仍未实测。
+6. **设置页双轨的实机表现**（2026-11-05 引入）：1.13+ 的声明式渲染与 1.5.0–1.12 的命令式渲染，两者的分组标题、自定义块（分类卡片列表 / 预设列表）的实际布局差异未实测；
+7. **声明式路径下自定义块的 CSS 匹配**：1.13+ 的 group 由 Obsidian 渲染，`.jev-cat-list` / `.jev-preset-list` 等自定义类是否仍按预期生效，未实测。
 
 ## 8. 交叉核对记录
 

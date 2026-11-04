@@ -36,6 +36,15 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # ESLint —— 与 Obsidian 商店审查同一份规则集（eslint-plugin-obsidianmd）。
+      #
+      # 本插件已在社区商店列表里。把官方规则集接进 CI，
+      # 「设置标题含插件名」「用 createEl("h2") 造标题」「没实现 getSettingDefinitions()」
+      # 这些审查意见会在**提交时**被拦下，
+      # 而不是等发版后被商店审查打回、从列表里下架。
+      - name: Lint
+        run: npm run lint
+
       # CSS lint —— 与 Obsidian 商店审查同一份规则集。
       #
       # 本插件已在社区商店列表里。把 stylelint-config-obsidianmd 接进 CI，

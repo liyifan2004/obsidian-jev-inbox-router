@@ -67,7 +67,9 @@ function defaultCategories(): CategoryConfig[] {
 }
 
 export function normalizeSettings(raw: RawSettings | null | undefined): JevSettings {
-	const source = (raw ?? {}) as RawSettings;
+	// raw 来自 data.json，运行时可能是任意形状；
+	// 下面的 normalizeCategory / bool / oneOf 逐字段兜底，不需要整体断言。
+	const source: RawSettings = raw ?? {};
 
 	const categories =
 		Array.isArray(source.categories) && source.categories.length > 0

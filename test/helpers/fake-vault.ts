@@ -257,7 +257,12 @@ export function serializeFrontmatter(data: Record<string, unknown>): string {
 
 function formatScalar(value: unknown): string {
 	if (typeof value === "number" || typeof value === "boolean") return String(value);
-	const text = String(value ?? "");
-	if (/^[A-Za-z0-9_./-]+$/.test(text)) return text;
-	return JSON.stringify(text);
+	if (typeof value === "string") {
+		return /^[A-Za-z0-9_./-]+$/.test(value) ? value : JSON.stringify(value);
+	}
+	// null / undefined / 对象：直接 JSON.stringify。
+	// 不要走 String(value ?? "") —— 对象会得到 "[object Object]"，
+	// 那既丢了信息，也会触发 @typescript-eslint/no-base-to-string。
+	if (value === null || value === undefined) return "";
+	return JSON.stringify(value) ?? "";
 }

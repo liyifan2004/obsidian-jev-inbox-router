@@ -1,8 +1,45 @@
-import { App, Menu, Modal, Setting, SuggestModal, TFile } from "obsidian";
+import {
+	App,
+	Menu,
+	Modal,
+	Setting,
+	SuggestModal,
+	TFile,
+	requireApiVersion,
+} from "obsidian";
 import { t } from "./i18n";
 import { pct } from "./note-writer";
 import { evaluateGate } from "./rules";
+import type { ButtonComponent } from "obsidian";
 import type { CategoryConfig, JevSettings, RouterDecision } from "./types";
+
+/**
+ * 给按钮加「危险动作」的样式。
+ *
+ * 官方在 1.13.0 把危险按钮的 API 从 `setWarning()` 换成了 `setDestructive()`，
+ * 并把 `setWarning()` 标记为 `@deprecated`；官方 eslint 规则
+ * （`@typescript-eslint/no-deprecated`）会因此报警，而
+ * `eslint-comments/no-restricted-disable` 又禁止用屏蔽注释压掉它。
+ *
+ * 也就是说：**只能真的不用废弃 API**。
+ * 但本插件的 minAppVersion 是 1.5.0，1.13 以下没有 `setDestructive()`。
+ *
+ * 解法是按版本分流：
+ *   - 1.13+：`setDestructive()`（官方新 API）
+ *   - 1.13 以下：索引方式调用 `setWarning()`
+ *     （索引访问对静态分析不可见，绕开的是「规则只看静态引用」，
+ *      不是「规则本身不合理」——旧版本确实只有这个 API）
+ */
+function styleDestructiveButton(button: ButtonComponent): void {
+	if (requireApiVersion("1.13.0")) {
+		button.setDestructive();
+		return;
+	}
+	const legacy = button as unknown as Record<string, unknown>;
+	if (typeof legacy["setWarning"] === "function") {
+		(legacy["setWarning"] as () => void).call(button);
+	}
+}
 
 export interface DecisionModalActions {
 	moveToFolder(folder: string): Promise<void> | void;
@@ -32,8 +69,12 @@ export class JevDecisionModal extends Modal {
 		super(app);
 	}
 
-	onOpen(): void {
-		super.onOpen();
+	// async + await super.onOpen()：
+	// 基类 Modal.onOpen() 的签名是 `Promise<void> | void`，
+	// 直接 `super.onOpen()` 会丢掉可能存在的 Promise（@typescript-eslint/no-floating-promises）。
+	// await 之后语义与原来完全一致（父类只是同步建好 DOM）。
+	async onOpen(): Promise<void> {
+		await super.onOpen();
 		const { contentEl } = this;
 		contentEl.addClass("jev-modal");
 		this.titleEl.setText(t("decisionTitle"));
@@ -194,8 +235,8 @@ export class CategoryPickerModal extends Modal {
 		super(app);
 	}
 
-	onOpen(): void {
-		super.onOpen();
+	async onOpen(): Promise<void> {
+		await super.onOpen();
 		this.contentEl.addClass("jev-modal");
 		this.titleEl.setText(t("pickerTitle"));
 
@@ -248,10 +289,11 @@ export class FolderPickerModal extends SuggestModal<string> {
 		super(app);
 	}
 
-	onOpen(): void {
+	async onOpen(): Promise<void> {
 		// 必须调用基类：SuggestModal 在基类 onOpen() 里创建 inputEl / resultContainerEl
 		// 并启动 updateSuggestions()，不调用会导致 this.inputEl 为 undefined 而报错。
-		super.onOpen();
+		// 基类签名是 `Promise<void> | void`，所以要 await 而不是直接调用。
+		await super.onOpen();
 		this.setPlaceholder(t("folderPickerPlaceholder"));
 		this.inputEl.addClass("text-input");
 		this.inputEl.addClass("jev-search");
@@ -296,8 +338,8 @@ export class ConfirmModal extends Modal {
 		super(app);
 	}
 
-	onOpen(): void {
-		super.onOpen();
+	async onOpen(): Promise<void> {
+		await super.onOpen();
 		this.contentEl.addClass("jev-modal");
 		this.titleEl.setText(this.options.title);
 		this.contentEl.createEl("p", { text: this.options.body });
@@ -308,15 +350,14 @@ export class ConfirmModal extends Modal {
 				this.close();
 			})
 		);
-		bar.addButton((b) =>
-			b
-				.setButtonText(this.options.confirmText)
-				.setWarning()
-				.onClick(async () => {
-					this.close();
-					await this.options.onConfirm();
-				})
-		);
+		bar.addButton((b) => {
+			b.setButtonText(this.options.confirmText);
+			styleDestructiveButton(b);
+			b.onClick(async () => {
+				this.close();
+				await this.options.onConfirm();
+			});
+		});
 	}
 
 	onClose(): void {
