@@ -479,6 +479,22 @@ details.jev-route-block li {
 
 /* -------------------------------------------------------------- 设置页 */
 
+/*
+ * 顶层自定义块（开场说明）。
+ *
+ * Obsidian 的 .setting-item 是两列网格（信息 | 控件）。
+ * 顶层块的内容比默认控件宽，需要独占整行 ——
+ * 否则开场说明会被挤在右半列里，读起来支离破碎。
+ */
+.jev-intro-row {
+	display: block;
+}
+
+.jev-intro-row .setting-item-control {
+	justify-content: flex-start;
+	width: 100%;
+}
+
 .jev-settings .jev-intro {
 	color: var(--text-muted);
 	max-width: 46em;

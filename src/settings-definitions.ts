@@ -165,14 +165,47 @@ export function createImperativeSink(root: HTMLElement): RowSink {
 export function createDeclarativeSink(): RowSink & {
 	groups: SettingDefinitionItem[];
 	heading(key: SectionKey): void;
+	/** 在所有分组**之前**放一个顶层自定义块。 */
+	topBlock(name: string, build: (container: HTMLElement) => void, cls?: string): void;
 } {
 	const groups: SettingDefinitionItem[] = [];
 	// 当前分组。items 在官方类型里是可选的，但**我们总是填它**，
 	// 所以这里单独记一份 items 引用，避免每次 push 都做可选性判断。
 	let currentItems: SettingGroupItem[] | null = null;
 
+	// 自定义块的渲染体（声明式与命令式共用同一份逻辑）。
+	const renderBlock = (
+		name: string,
+		build: (container: HTMLElement) => void,
+		cls?: string
+	) => ({
+		// 自定义块没有单一可搜的名称，让它进搜索只会匹配出噪声。
+		name,
+		searchable: false,
+		render: (setting: Setting) => {
+			// 自定义块要占满整行。
+			// **只清 infoEl，不清 settingEl** —— 见 createImperativeSink 里的说明：
+			// Obsidian 的 Setting 结构是 `settingEl > (infoEl, controlEl)`，
+			// empty() 整个 settingEl 会连 controlEl 一起清掉，
+			// 之后画进 controlEl 的内容**不会出现在页面上**。
+			setting.infoEl.empty();
+			setting.controlEl.addClass("jev-custom-block");
+			// cls 打在**行**上（不是内容上）——
+			// 布局规则要作用在这一行本身（display:block 才能让它通栏）。
+			if (cls) setting.settingEl.addClass(cls);
+			build(setting.controlEl);
+		},
+	});
+
 	return {
 		groups,
+		topBlock(name: string, build: (container: HTMLElement) => void, cls?: string) {
+			// 顶层块直接作为数组的一项，不塞进任何分组。
+			// 官方类型 `SettingDefinitionItem` 允许顶层就是一条
+			// `SettingDefinition`（含 render）—— 它会渲染成
+			// 「所有分组上方的一行」，正是开场说明该在的位置。
+			groups.push(renderBlock(name, build, cls));
+		},
 		heading(key: SectionKey) {
 			const items: SettingGroupItem[] = [];
 			currentItems = items;
@@ -194,21 +227,7 @@ export function createDeclarativeSink(): RowSink & {
 		},
 		block(name: string, build: (container: HTMLElement) => void) {
 			if (!currentItems) return;
-			currentItems.push({
-				// 自定义块没有单一可搜的名称，让它进搜索只会匹配出噪声。
-				name,
-				searchable: false,
-				render: (setting: Setting) => {
-					// 自定义块要占满整行。
-					// **只清 infoEl，不清 settingEl** —— 见 createImperativeSink 里的说明：
-					// Obsidian 的 Setting 结构是 `settingEl > (infoEl, controlEl)`，
-					// empty() 整个 settingEl 会连 controlEl 一起清掉，
-					// 之后画进 controlEl 的内容**不会出现在页面上**。
-					setting.infoEl.empty();
-					setting.controlEl.addClass("jev-custom-block");
-					build(setting.controlEl);
-				},
-			});
+			currentItems.push(renderBlock(name, build));
 		},
 	};
 }

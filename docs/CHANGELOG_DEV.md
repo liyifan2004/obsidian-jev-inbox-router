@@ -96,6 +96,54 @@
 
 ---
 
+## 2026-11-12 · 声明式路径的运行时状态（ISS-033~035）
+
+上一轮（2026-11-05）把设置页改成了双轨：`getSettingDefinitions()` 给 1.13+，
+`display()` 给 1.13 以下，并且加了「两条路径产出的行集合必须一致」的断言。
+
+**但行集合一致 ≠ 运行正确。** 本轮查的是结构一致、但运行时分道扬镳的三类缺陷。
+
+### 根因
+
+Obsidian 1.13+ 一旦 `getSettingDefinitions()` 返回非空数组，就**完全不再调用
+`display()`**。而 `renderImperative()` 里做了三件**声明式路径没有对应实现**的事：
+
+| # | 缺失 | 用户在 1.13+ 上的实际后果 |
+| --- | --- | --- |
+| ISS-033 | `this.folders = router.getAllFolders()` | 分类卡片里的「目标文件夹」下拉框**只剩一个空选项**，选不了任何真实文件夹 |
+| ISS-034 | `this.containerEl.addClass("jev-settings")` | CSS 里所有 `.jev-settings …` 规则（平板断点的堆叠布局、控件宽度）**全部失效** |
+| ISS-035 | 开场说明 `settingsIntro` | 用户看不到「这插件只做分类投递、不改写内容」这段定位说明 |
+
+ISS-033 尤其隐蔽：`folders` 的初值是 `[]`（不是 undefined），
+所以不会报错，只是**下拉框是空的** —— 用户以为插件坏了。
+
+### 修法
+
+1. 声明式路径补上同样的三件事（同步 draft / folders / 容器类 + 顶层说明块）。
+2. 开场说明改走 `sink.topBlock()` —— 新增的顶层块能力。
+   官方类型 `SettingDefinitionItem` 允许顶层就是一条含 `render` 的定义，
+   它会渲染成「所有分组上方的一行」，正是开场说明该在的位置。
+   两条路径共用同一个块名，双轨一致性断言照样成立。
+3. 命令式路径的开场说明也改走 `sink.block("settingsIntro", …)`，
+   与声明式路径对齐（此前命令式是直接 `containerEl.createEl`，
+   在两条路径里形态不同）。
+
+### 一个测试桩的坑（顺手修掉）
+
+`test/mocks/obsidian.ts` 里基类 `PluginSettingTab` 原本给
+`getSettingDefinitions()` 提供了一个「返回空数组」的实现。
+这会让子类的同名方法被**遮蔽** —— 测试调用的是基类那个空实现，
+于是「声明式路径返回了什么」根本测不到。
+
+改成基类直接抛错：子类没实现时立刻暴露。
+（这个坑是本轮写新测试时才发现的：断言失败但直接调用却是对的。）
+
+### 验证
+
+测试 229 → **234**（新增 `test/declarative-runtime-state.test.ts` 5 例）。
+反证：移除声明式路径的状态同步 → 2 例失败（jev-settings 类、folders）。
+`npm run verify`（typecheck + lint + stylelint + test + build）全通过。
+
 ## 2026-11-05 · 商店审查自查接入 + 设置页双轨重构（ISS-026~032）
 
 **背景**：本插件已在 Obsidian 社区商店列表里。上一轮（MSE 1.0.42）发现商店审查用的规则集是**公开且可本地运行**的 —— `eslint-plugin-obsidianmd`（TS 源码）+ `stylelint-config-obsidianmd`（CSS）。本轮把 eslint 那一半接进来，并按它的规则改代码。

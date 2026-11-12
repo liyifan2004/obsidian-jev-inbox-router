@@ -75,6 +75,35 @@ export class JevSettingTab extends PluginSettingTab {
 	getSettingDefinitions(): SettingDefinitionItem[] {
 		const sink = createDeclarativeSink();
 
+		// 命令式路径的 `renderImperative()` 做两件这里也必须做的事：
+		//
+		// 1. **同步草稿与文件夹列表**。`this.draft` 与 `this.folders` 是
+		//    命令式渲染的输入；声明式路径的 render 回调同样要读它们。
+		//    此前只有 renderImperative() 赋值，1.13+ 上这两个字段
+		//    一直是构造时的初值 —— 分类卡片里的「目标文件夹」下拉框
+		//    因此只剩一个空选项，用户选不了任何真实文件夹。
+		// 2. **给容器加 `jev-settings` 类**。CSS 里的 `.jev-settings …`
+		//    规则（平板断点下的堆叠布局、控件宽度）全都以这个类为前提；
+		//    1.13+ 上没有它，响应式布局整个失效。
+		this.draft = this.plugin.settings;
+		this.folders = this.plugin.router.getAllFolders();
+		this.containerEl.addClass("jev-settings");
+
+		// 3. **开场说明**。命令式路径在第一行之前有一段 `jev-intro`
+		//    （说明 JEV 只做分类与投递、不改写内容）。
+		//    1.13+ 上没有它 —— 用户看不到这段定位说明，
+		//    而它正是设置页要回答的第一个问题（这插件会动我的内容吗）。
+		sink.topBlock(
+			"settingsIntro",
+			(root) => {
+				root.createEl("p", {
+					cls: "jev-intro",
+					text: t("settingsIntro"),
+				});
+			},
+			"jev-intro-row"
+		);
+
 		sink.heading(SECTION_KEYS.api);
 		this.renderApiSection(sink);
 
@@ -151,12 +180,16 @@ export class JevSettingTab extends PluginSettingTab {
 		containerEl.empty();
 		containerEl.addClass("jev-settings");
 
-		containerEl.createEl("p", {
-			cls: "jev-intro",
-			text: t("settingsIntro"),
-		});
-
 		const sink = createImperativeSink(containerEl);
+
+		// 开场说明走 sink.block —— 与声明式路径同一个块名，
+		// 两条路径的行集合才能对上（双轨一致性断言依赖这一点）。
+		sink.block("settingsIntro", (root) => {
+			root.createEl("p", {
+				cls: "jev-intro",
+				text: t("settingsIntro"),
+			});
+		});
 
 		// 分组标题：命令式路径下没有声明式的 group 概念，
 		// 所以自己用 setHeading() 画一条。标题文本来自同一个 sectionHeading()，

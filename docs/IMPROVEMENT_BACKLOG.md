@@ -186,6 +186,28 @@
 - **验收**：13 个新用例；3 次反证全部成功（删节 / 不挂控件 / render 返回 Setting 对象）。
 - **状态**：已处理（2026-11-05）
 
+## ISS-033（P1，功能不可达）1.13+ 的分类「目标文件夹」下拉框是空的
+- **证据**：`src/settings-tab.ts` 的 `this.folders = this.plugin.router.getAllFolders()` 只在 `renderImperative()` 里赋值；`getSettingDefinitions()` 不调它。`folders` 的初值是 `[]`（不是 undefined），所以不报错。
+- **影响**：Obsidian 1.13+ 的用户打开设置页，展开任意分类卡片，「目标文件夹」下拉框**只有一个「（根目录）」选项** —— 一个真实文件夹都选不了。分类功能在 1.13+ 上等于不可用。
+- **根因**：Obsidian 1.13+ 一旦 `getSettingDefinitions()` 返回非空数组，就**完全不再调用 `display()`**。命令式渲染的输入准备步骤在声明式路径上没有对应实现。
+- **方案**：在 `getSettingDefinitions()` 里同步 `this.draft` / `this.folders` / 容器类，与 `renderImperative()` 做同一件事。
+- **验收**：新增用例「声明式路径会加载文件夹列表」；反证（移除同步）→ 用例失败。
+- **状态**：已处理（2026-11-12）
+
+## ISS-034（P2，视觉缺陷）1.13+ 的设置页响应式布局失效
+- **证据**：`containerEl.addClass("jev-settings")` 只在 `renderImperative()` 里调用。`styles.css` 里 `.jev-settings .setting-item` / `.jev-settings .setting-item-control` / `.jev-settings .setting-item-control input` 等规则（平板 768px 断点下的堆叠布局与控件宽度）全部以这个类为前提。
+- **影响**：1.13+ 的用户在平板/窄窗口下，设置项不换行、控件不撑满宽度 —— 与 1.13 以下路径观感不同。
+- **方案**：同 ISS-033，在声明式路径补上 `addClass("jev-settings")`。
+- **验收**：新增用例「容器上有 jev-settings 类」；反证 → 用例失败。
+- **状态**：已处理（2026-11-12）
+
+## ISS-035（P2，理解成本）1.13+ 的设置页没有开场说明
+- **证据**：`settingsIntro` 段落（说明 JEV 只做分类投递、不改写内容）只在 `renderImperative()` 里通过 `containerEl.createEl` 画出来；声明式路径没有。
+- **影响**：1.13+ 的用户打开设置页第一眼看到的是「JEV 接口」分组标题，而不是「这插件会动我的内容吗」的答案 —— 设置页要回答的第一个问题没人回答。
+- **方案**：给 sink 增加 `topBlock()`（顶层自定义块，官方类型允许顶层就是一条含 `render` 的定义）；命令式路径的开场说明也改走 `sink.block("settingsIntro", …)`，两条路径共用同一个块名。
+- **验收**：新增用例「开场说明在两条路径里都存在」；双轨一致性断言照常通过。
+- **状态**：已处理（2026-11-12）
+
 ---
 
 ## 2026-10-23 批次的实施与验证记录

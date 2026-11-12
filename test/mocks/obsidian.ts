@@ -170,9 +170,23 @@ export class PluginSettingTab {
 		/* noop */
 	}
 
-	/** 1.13+ 的声明式定义 API。基类没有具体实现，桩里返回空数组。 */
+	/**
+	 * 1.13+ 的声明式定义 API。
+	 *
+	 * **基类不提供实现** —— 官方 d.ts 里 `getSettingDefinitions()` 是抽象方法，
+	 * 由插件子类实现。桩里如果给基类一个返回空数组的实现，
+	 * 子类的 `getSettingDefinitions()` 会被**遮蔽**：
+	 * 测试调用的其实是基类那个空实现，
+	 * 于是「声明式路径返回了什么」根本测不到。
+	 *
+	 * 所以这里**不实现**它 —— 子类没实现时调用会抛错，
+	 * 这正好能立刻暴露「测的其实是基类桩」的情况。
+	 */
 	getSettingDefinitions(): unknown[] {
-		return [];
+		throw new Error(
+			"PluginSettingTab.getSettingDefinitions() 应由插件子类实现；" +
+				"调用到这里说明测试命中了基类桩。"
+		);
 	}
 }
 
@@ -270,10 +284,29 @@ export function makeStubElement(): HTMLElement {
 	const el: Record<string, unknown> = {
 		setAttribute: () => undefined,
 		getAttribute: () => null,
-		addClass: () => undefined,
-		removeClass: () => undefined,
-		toggleClass: () => undefined,
-		hasClass: () => false,
+		// 类名要真的记录下来 —— 有些缺陷只在「某个 CSS 作用域类没被加上」
+		// 时才看得见（例如响应式布局规则全都挂在 `.jev-settings` 之下）。
+		addClass: (...cls: string[]) => {
+			const classes = el.__classes as string[];
+			for (const c of cls) {
+				if (!classes.includes(c)) classes.push(c);
+			}
+		},
+		removeClass: (...cls: string[]) => {
+			el.__classes = (el.__classes as string[]).filter((c) => !cls.includes(c));
+		},
+		toggleClass: (cls: string, force?: boolean) => {
+			const classes = el.__classes as string[];
+			const has = classes.includes(cls);
+			const next = force ?? !has;
+			if (next && !has) classes.push(cls);
+			if (!next && has) {
+				el.__classes = classes.filter((c) => c !== cls);
+			}
+		},
+		hasClass: (cls: string) => (el.__classes as string[]).includes(cls),
+		/** 记录下来的类名（测试用来断言 CSS 作用域类有没有被加上） */
+		__classes: [] as string[],
 		setText: () => undefined,
 		appendChild: () => el,
 		remove: () => undefined,

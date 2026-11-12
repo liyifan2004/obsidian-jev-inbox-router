@@ -81,19 +81,57 @@ function makeTab(plugin: PluginStub) {
 	return tab;
 }
 
+/**
+ * 把声明式定义摊平成「所有项」的一维列表。
+ *
+ * 顶层既有分组（`type: "group"`，items 是它的子项），
+ * 也有顶层自定义块（本身就是一条定义，没有 items）。
+ * 两种形态都要被遍历到，所以这里统一摊平。
+ */
+function flattenDefinitions(
+	defs: unknown
+): Array<{ name?: string; render?: (setting: Setting) => unknown }> {
+	const list = defs as Array<{
+		type: string;
+		items?: Array<{ name?: string; render?: (setting: Setting) => unknown }>;
+		name?: string;
+		render?: (setting: Setting) => unknown;
+	}>;
+	const out: Array<{ name?: string; render?: (setting: Setting) => unknown }> = [];
+	for (const d of list) {
+		if (d.type === "group" || d.type === "list") {
+			out.push(...(d.items ?? []));
+		} else {
+			// 顶层块本身就是一条定义。
+			out.push({ name: d.name, render: d.render });
+		}
+	}
+	return out;
+}
+
 beforeEach(() => {
 	createdSettings.length = 0;
 	__setApiVersion(false);
 });
 
 describe("设置页双轨一致性", () => {
-	it("声明式定义包含全部 7 个分组", () => {
+	it("声明式定义包含全部 7 个分组，外加一个顶层开场说明块", () => {
 		const plugin = makePlugin(deepCopy(DEFAULT_SETTINGS));
 		const tab = makeTab(plugin);
 
-		const groups = tab.getSettingDefinitions() as { type: string; heading?: string; items: unknown[] }[];
+		const items = tab.getSettingDefinitions() as {
+			type: string;
+			heading?: string;
+			items?: unknown[];
+		}[];
 
-		expect(groups).toHaveLength(7);
+		// 顶层是「开场说明块 + 7 个分组」。
+		// 开场说明块是 SettingDefinition（type 不是 group），
+		// 放在所有分组之前 —— 它是设置页要回答的第一个问题
+		// （这插件会不会改我的内容）。
+		expect(items).toHaveLength(8);
+		expect(items[0].type).not.toBe("group");
+		const groups = items.slice(1);
 		expect(groups.every((g) => g.type === "group")).toBe(true);
 		// 分组标题一个都不能少，且都不含插件名
 		const headings = groups.map((g) => g.heading ?? "");
@@ -110,11 +148,14 @@ describe("设置页双轨一致性", () => {
 	it("分组顺序与 SECTION_KEYS 一致", () => {
 		const plugin = makePlugin(deepCopy(DEFAULT_SETTINGS));
 		const tab = makeTab(plugin);
-		const groups = tab.getSettingDefinitions() as { heading?: string }[];
+		const items = tab.getSettingDefinitions() as { heading?: string; type: string }[];
 
 		// sectionHeading 的取值为本地化文案，这里直接比对「每个分组都非空且唯一」
 		// —— 顺序由 getSettingDefinitions 的调用顺序决定。
-		const headings = groups.map((g) => g.heading ?? "");
+		const headings = items
+			.filter((d) => d.type === "group")
+			.map((g) => g.heading ?? "");
+		expect(headings.length).toBe(7);
 		expect(headings[0]).toBeTruthy();
 		expect(headings[headings.length - 1]).toBeTruthy();
 	});
@@ -127,19 +168,15 @@ describe("设置页双轨一致性", () => {
 		// TypeError: t is not a function → **设置子页面永远打不开**。
 		const plugin = makePlugin(deepCopy(DEFAULT_SETTINGS));
 		const tab = makeTab(plugin);
-		const groups = tab.getSettingDefinitions() as {
-			items: { render?: (setting: Setting) => unknown }[];
-		}[];
+		const items = flattenDefinitions(tab.getSettingDefinitions());
 
 		let checked = 0;
-		for (const group of groups) {
-			for (const item of group.items) {
-				if (!item.render) continue;
-				const fake = new Setting(makeEl());
-				const result = item.render(fake);
-				expect(result).toBeUndefined();
-				checked += 1;
-			}
+		for (const item of items) {
+			if (!item.render) continue;
+			const fake = new Setting(makeEl());
+			const result = item.render(fake);
+			expect(result).toBeUndefined();
+			checked += 1;
 		}
 		expect(checked).toBeGreaterThan(0);
 	});
@@ -154,20 +191,16 @@ describe("设置页双轨一致性", () => {
 		const plugin = makePlugin(deepCopy(DEFAULT_SETTINGS));
 		const tab = makeTab(plugin);
 
-		const groups = tab.getSettingDefinitions() as {
-			items: { name?: string; render?: (setting: Setting) => unknown }[];
-		}[];
+		const items = flattenDefinitions(tab.getSettingDefinitions());
 
 		let checked = 0;
-		for (const group of groups) {
-			for (const item of group.items) {
-				if (!item.render) continue;
-				const setting = new Setting(makeEl());
-				item.render(setting);
-				const control = setting.controlEl as unknown as { __detached?: boolean };
-				expect(control.__detached).not.toBe(true);
-				checked += 1;
-			}
+		for (const item of items) {
+			if (!item.render) continue;
+			const setting = new Setting(makeEl());
+			item.render(setting);
+			const control = setting.controlEl as unknown as { __detached?: boolean };
+			expect(control.__detached).not.toBe(true);
+			checked += 1;
 		}
 		expect(checked).toBeGreaterThan(0);
 	});
@@ -188,17 +221,12 @@ describe("设置页双轨一致性", () => {
 		// 声明式是 group.heading 字段 —— 所以这里只比「非标题行」，
 		// 标题的一致性由下面那条专门断言覆盖。
 		createdSettings.length = 0;
-		const groups = tab.getSettingDefinitions() as {
-			heading?: string;
-			items: { name?: string; render?: (setting: Setting) => unknown }[];
-		}[];
+		const items = flattenDefinitions(tab.getSettingDefinitions());
 		const declarativeNames: string[] = [];
-		for (const group of groups) {
-			for (const item of group.items) {
-				if (item.name) declarativeNames.push(item.name);
-				// 触发 render，才能拿到自定义块里的嵌套行
-				if (item.render) item.render(new Setting(makeEl()));
-			}
+		for (const item of items) {
+			if (item.name) declarativeNames.push(item.name);
+			// 触发 render，才能拿到自定义块里的嵌套行
+			if (item.render) item.render(new Setting(makeEl()));
 		}
 
 		expect(imperativeNames.length).toBeGreaterThan(0);
@@ -218,7 +246,12 @@ describe("设置页双轨一致性", () => {
 		//
 		// 自定义块（block）的宿主行本身没有控件 —— 它的内容在 controlEl 里，
 		// 由块内部的行承载。所以排除掉已知的块宿主行。
-		const blockHosts = new Set(["presetList", "categoryList", "categoryActions"]);
+		const blockHosts = new Set([
+			"presetList",
+			"categoryList",
+			"categoryActions",
+			"settingsIntro",
+		]);
 
 		tab.display();
 		const empty = createdSettings
@@ -250,22 +283,18 @@ describe("设置页双轨一致性", () => {
 		const imperative = fingerprint(createdSettings.filter((s) => !s.heading));
 
 		createdSettings.length = 0;
-		const groups = tab.getSettingDefinitions() as {
-			items: { name?: string; render?: (setting: Setting) => unknown }[];
-		}[];
+		const items = flattenDefinitions(tab.getSettingDefinitions());
 		// 声明式路径：每一项产出的是「宿主行」（render 收到的那个 Setting，
 		// 控件挂在它身上）**加上** render 内部新建的嵌套行。
 		// 命令式路径下这两类行都是 Setting 桩记录下来的，所以两边口径要对齐。
 		const declarativeRows: { name?: string; controls: string[] }[] = [];
-		for (const group of groups) {
-			for (const item of group.items) {
-				const host = new Setting(makeEl());
-				const before = createdSettings.length;
-				if (item.render) item.render(host);
-				declarativeRows.push({ name: item.name, controls: host.controls });
-				for (const s of createdSettings.slice(before)) {
-					declarativeRows.push({ name: s.name, controls: s.controls });
-				}
+		for (const item of items) {
+			const host = new Setting(makeEl());
+			const before = createdSettings.length;
+			if (item.render) item.render(host);
+			declarativeRows.push({ name: item.name, controls: host.controls });
+			for (const s of createdSettings.slice(before)) {
+				declarativeRows.push({ name: s.name, controls: s.controls });
 			}
 		}
 		const declarative = fingerprint(declarativeRows);
@@ -286,8 +315,10 @@ describe("设置页双轨一致性", () => {
 			.filter((n): n is string => typeof n === "string");
 
 		// 声明式：group.heading
-		const groups = tab.getSettingDefinitions() as { heading?: string }[];
-		const declarativeHeadings = groups.map((g) => g.heading ?? "");
+		const items = tab.getSettingDefinitions() as { heading?: string; type: string }[];
+		const declarativeHeadings = items
+			.filter((d) => d.type === "group")
+			.map((g) => g.heading ?? "");
 
 		expect(imperativeHeadings.length).toBe(7);
 		expect(declarativeHeadings.sort()).toEqual(imperativeHeadings.sort());
@@ -337,7 +368,8 @@ describe("刷新路径分流", () => {
 		const first = tab.getSettingDefinitions();
 		const second = tab.getSettingDefinitions();
 		expect(first).toHaveLength(second.length);
-		expect(first.length).toBe(7);
+		// 7 个分组 + 1 个顶层开场说明块
+		expect(first.length).toBe(8);
 	});
 });
 
