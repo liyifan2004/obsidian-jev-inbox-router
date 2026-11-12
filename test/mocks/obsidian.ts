@@ -332,11 +332,66 @@ export function makeStubElement(): HTMLElement {
 		__children: [] as unknown[],
 		/** 是否已被 empty() 脱离 */
 		__detached: false,
+		/**
+		 * 可见内容记录（tag / 文本 / 类名）。
+		 *
+		 * ## 为什么需要它
+		 *
+		 * 「Setting 桩的记录」只是**一种**能力的承载方式。
+		 * 往容器里 `createEl("p", { text })` 画出来的说明段落、
+		 * `createDiv({ cls })` 画出来的卡片，都**不进** Setting 桩的记录 ——
+		 * 于是「设置页少了什么」这类缺陷对现有断言是隐形的。
+		 *
+		 * 实测（2026-11-13）：把 JEV 声明式路径的开场说明段落整个删掉，
+		 * 234 个测试**全部通过**。
+		 *
+		 * 所以这里记录每一个被创建出来的元素的内容，
+		 * 让「用户能看到的文字」变成可断言的。
+		 */
+		__visible: [] as Array<{ tag: string; text: string; cls: string }>,
 	};
-	el.createEl = () => makeStubElement();
-	el.createDiv = () => makeStubElement();
-	el.createSpan = () => makeStubElement();
+
+	/** 记录一个被创建出来的可见元素，并挂到父节点。 */
+	const record = (tag: string, opts?: { text?: string; cls?: string }): HTMLElement => {
+		const child = makeStubElement();
+		(child as unknown as {
+			__visible: Array<{ tag: string; text: string; cls: string }>;
+		}).__visible.push({
+			tag,
+			text: opts?.text ?? "",
+			cls: opts?.cls ?? "",
+		});
+		// 挂到父节点，模拟真实 DOM 的父子关系。
+		(el.__children as unknown[]).push(child);
+		return child;
+	};
+
+	el.createEl = (tag: string, opts?: { text?: string; cls?: string }) => record(tag, opts);
+	el.createDiv = (opts?: { text?: string; cls?: string }) => record("div", opts);
+	el.createSpan = (opts?: { text?: string; cls?: string }) => record("span", opts);
 	return el as unknown as HTMLElement;
+}
+
+/**
+ * 收集一个容器下的全部可见内容（递归）。
+ *
+ * 返回 `tag|文本` 的列表，忽略类名 ——
+ * 类名是样式，不是用户能读到的信息。
+ */
+export function collectVisibleContent(el: HTMLElement): string[] {
+	const out: string[] = [];
+	const walk = (node: HTMLElement) => {
+		const visible = (node as unknown as {
+			__visible?: Array<{ tag: string; text: string; cls: string }>;
+		}).__visible;
+		for (const v of visible ?? []) {
+			if (v.text) out.push(`${v.tag}|${v.text}`);
+		}
+		const children = (node as unknown as { __children?: unknown[] }).__children ?? [];
+		for (const child of children) walk(child as HTMLElement);
+	};
+	walk(el);
+	return out;
 }
 
 /** 所有被创建出来的 Setting 行 —— 测试用来断言两条渲染路径的一致性。 */
@@ -386,6 +441,14 @@ export class Setting {
 		const children = (this.settingEl as unknown as { __children?: unknown[] }).__children;
 		if (children) {
 			children.push(this.infoEl, this.controlEl);
+		}
+		// 整行挂到传入的父容器上（真实 Obsidian 的行为）。
+		// 不挂的话，父容器上看不到这一行 ——
+		// 「内容画在哪个容器里」这类问题就查不出来。
+		const parent = el as { __children?: unknown[] } | undefined;
+		const parentChildren = parent?.__children;
+		if (parentChildren) {
+			parentChildren.push(this.settingEl);
 		}
 	}
 
